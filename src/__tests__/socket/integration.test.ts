@@ -1,8 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	getChannelFailedMessages,
-	setChannelFailedMessages,
-} from "../../socket/failed-messages";
+import { getChannelFailedMessages } from "../../socket/failed-messages";
 import { WebSocketManager } from "../../socket/manager";
 import { useSocketStore } from "../../socket/store";
 import type { TSocketMessageFromServerToClient } from "../../socket/types";

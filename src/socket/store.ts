@@ -15,9 +15,13 @@ import type {
 	TStoredNotification,
 } from "./types";
 
+// ── Action ref (read by inspector) ──────────────────────────────────
+
+export const _actionRef = { current: "unknown" };
+
 // ── Store shape ─────────────────────────────────────────────────────
 
-type TSocketStore = {
+export type TSocketStore = {
 	connectionState: TConnectionState;
 	hasConnected: boolean;
 	conversationMessages: Record<string, TClientConversationMessage[]>;
@@ -65,6 +69,7 @@ export const useSocketStore = create<TSocketStore>()(
 		handleServerMessage(msg) {
 			if (msg.action === "message" && msg.type === "conversation") {
 				if (msg.delivery === "dump") {
+					_actionRef.current = "serverMessage/conversation-dump";
 					set((s) => {
 						const dumpIds = new Set(msg.messages.map((m) => m.id));
 						const failed = getChannelFailedMessages(msg.channel);
@@ -89,6 +94,7 @@ export const useSocketStore = create<TSocketStore>()(
 				}
 
 				if (msg.delivery === "event") {
+					_actionRef.current = "serverMessage/conversation-event";
 					set((s) => {
 						const existing = s.conversationMessages[msg.channel] ?? [];
 						const idx = existing.findIndex((m) => m.id === msg.id);
@@ -127,6 +133,7 @@ export const useSocketStore = create<TSocketStore>()(
 				}
 
 				if (msg.delivery === "error") {
+					_actionRef.current = "serverMessage/conversation-error";
 					set((s) => {
 						const result: Partial<TSocketStore> = {
 							lastError: {
@@ -174,6 +181,7 @@ export const useSocketStore = create<TSocketStore>()(
 
 			if (msg.action === "message" && msg.type === "notification") {
 				if (msg.delivery === "dump") {
+					_actionRef.current = "serverMessage/notification-dump";
 					set((s) => ({
 						notificationMessages: {
 							...s.notificationMessages,
@@ -184,6 +192,7 @@ export const useSocketStore = create<TSocketStore>()(
 				}
 
 				if (msg.delivery === "event") {
+					_actionRef.current = "serverMessage/notification-event";
 					const entry: TStoredNotification = {
 						id: msg.id,
 						title: msg.title,
@@ -204,6 +213,7 @@ export const useSocketStore = create<TSocketStore>()(
 			}
 
 			if (msg.action === "error") {
+				_actionRef.current = "serverMessage/protocol-error";
 				set({
 					lastError: {
 						code: msg.code,
@@ -216,6 +226,7 @@ export const useSocketStore = create<TSocketStore>()(
 		},
 
 		addOptimisticMessage(channel, msg) {
+			_actionRef.current = "addOptimisticMessage";
 			set((s) => {
 				const existing = s.conversationMessages[channel] ?? [];
 				return {
@@ -228,6 +239,7 @@ export const useSocketStore = create<TSocketStore>()(
 		},
 
 		setMessageStatus(channel, messageId, status) {
+			_actionRef.current = "setMessageStatus";
 			set((s) => {
 				const existing = s.conversationMessages[channel] ?? [];
 				const idx = existing.findIndex((m) => m.id === messageId);
@@ -256,6 +268,7 @@ export const useSocketStore = create<TSocketStore>()(
 		},
 
 		setConnectionState(state) {
+			_actionRef.current = "setConnectionState";
 			set((s) => ({
 				connectionState: state,
 				hasConnected: s.hasConnected || state === "connected",
@@ -263,6 +276,7 @@ export const useSocketStore = create<TSocketStore>()(
 		},
 
 		incrementRefCount(key) {
+			_actionRef.current = "incrementRefCount";
 			set((s) => {
 				const current = s.subscriptionRefCounts[key] ?? 0;
 				return {
@@ -275,6 +289,7 @@ export const useSocketStore = create<TSocketStore>()(
 		},
 
 		decrementRefCount(key) {
+			_actionRef.current = "decrementRefCount";
 			set((s) => {
 				const current = s.subscriptionRefCounts[key] ?? 0;
 				if (current <= 1) {
@@ -306,10 +321,12 @@ export const useSocketStore = create<TSocketStore>()(
 		},
 
 		setPendingQueueLength(length) {
+			_actionRef.current = "setPendingQueueLength";
 			set({ pendingQueueLength: length });
 		},
 
 		setLastError(error) {
+			_actionRef.current = "setLastError";
 			set({
 				lastError: error
 					? {
