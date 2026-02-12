@@ -5,6 +5,7 @@ export function extractState(fullState: TSocketStore): TSocketStoreState {
 	return {
 		connectionState: fullState.connectionState,
 		hasConnected: fullState.hasConnected,
+		hasDisconnected: fullState.hasDisconnected,
 		conversationMessages: fullState.conversationMessages,
 		notificationMessages: fullState.notificationMessages,
 		subscriptionRefCounts: fullState.subscriptionRefCounts,

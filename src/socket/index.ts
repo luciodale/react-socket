@@ -29,12 +29,14 @@ export function useWebSocketManager(): WebSocketManager {
 
 type TWebSocketProviderProps = {
 	url?: string;
+	token?: string;
 	config?: Partial<TWebSocketManagerConfig>;
 	children: ReactNode;
 };
 
 export function WebSocketProvider({
 	url = WS_URL,
+	token,
 	config,
 	children,
 }: TWebSocketProviderProps) {
@@ -44,6 +46,7 @@ export function WebSocketProvider({
 	if (!managerRef.current) {
 		managerRef.current = new WebSocketManager({
 			url,
+			token,
 			...config,
 			onMessage: (msg) => {
 				store.getState().handleServerMessage(msg);
@@ -86,6 +89,7 @@ export { WebSocketManager } from "./manager";
 export {
 	selectConnectionState,
 	selectConversationMessages,
+	selectHasDisconnected,
 	selectIsSubscribed,
 	selectLastError,
 	selectNotificationMessages,

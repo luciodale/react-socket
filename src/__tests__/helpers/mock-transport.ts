@@ -7,12 +7,12 @@ export class MockTransport implements IWebSocketTransport {
 	onerror: ((event: Event) => void) | null = null;
 
 	readyState: number = WebSocket.CLOSED;
-	connectCalls: string[] = [];
+	connectCalls: { url: string; protocols?: string | string[] }[] = [];
 	sentMessages: string[] = [];
 	disconnectCalls: { code?: number; reason?: string }[] = [];
 
-	connect(url: string): void {
-		this.connectCalls.push(url);
+	connect(url: string, protocols?: string | string[]): void {
+		this.connectCalls.push({ url, protocols });
 		this.readyState = WebSocket.CONNECTING;
 	}
 
@@ -52,7 +52,7 @@ export class MockTransport implements IWebSocketTransport {
 	}
 
 	reset(): void {
-		this.connectCalls = [];
+		this.connectCalls = [] as { url: string; protocols?: string | string[] }[];
 		this.sentMessages = [];
 		this.disconnectCalls = [];
 		this.readyState = WebSocket.CLOSED;

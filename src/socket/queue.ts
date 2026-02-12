@@ -71,12 +71,14 @@ export function removeByChannelAndType(
 export function drainQueue(
 	queue: TQueuedMessage[],
 	sendFn: (data: string) => boolean,
+	onSent?: (entry: TQueuedMessage) => void,
 ): TQueuedMessage[] {
 	let remaining = [...queue];
 	for (const entry of queue) {
 		const success = sendFn(JSON.stringify(entry.payload));
 		if (!success) break;
 		remaining = remaining.filter((m) => m.id !== entry.id);
+		onSent?.(entry);
 	}
 	saveQueue(remaining);
 	return remaining;

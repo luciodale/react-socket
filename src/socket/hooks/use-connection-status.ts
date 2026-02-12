@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { useSocketStore } from "../store";
 import type { TConnectionState } from "../types";
 
@@ -14,13 +13,7 @@ type TConnectionStatus =
 export function useConnectionStatus(): TConnectionStatus {
 	const connectionState = useSocketStore((s) => s.connectionState);
 	const lastError = useSocketStore((s) => s.lastError);
-	const [hasHadError, setHasHadError] = useState(false);
-
-	useEffect(() => {
-		if (lastError) {
-			setHasHadError(true);
-		}
-	}, [lastError]);
+	const hasDisconnected = useSocketStore((s) => s.hasDisconnected);
 
 	if (lastError) {
 		return {
@@ -30,7 +23,7 @@ export function useConnectionStatus(): TConnectionStatus {
 		};
 	}
 
-	if (connectionState === "connected" && hasHadError) {
+	if (connectionState === "connected" && hasDisconnected) {
 		return { visible: true, state: "connected", message: "Back online" };
 	}
 

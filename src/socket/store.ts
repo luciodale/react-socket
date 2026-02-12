@@ -24,6 +24,7 @@ export const _actionRef = { current: "unknown" };
 export type TSocketStore = {
 	connectionState: TConnectionState;
 	hasConnected: boolean;
+	hasDisconnected: boolean;
 	conversationMessages: Record<string, TClientConversationMessage[]>;
 	notificationMessages: Record<string, TStoredNotification[]>;
 	subscriptionRefCounts: Record<string, number>;
@@ -60,6 +61,7 @@ export const useSocketStore = create<TSocketStore>()(
 	subscribeWithSelector((set) => ({
 		connectionState: "disconnected",
 		hasConnected: false,
+		hasDisconnected: false,
 		conversationMessages: {},
 		notificationMessages: {},
 		subscriptionRefCounts: {},
@@ -272,6 +274,10 @@ export const useSocketStore = create<TSocketStore>()(
 			set((s) => ({
 				connectionState: state,
 				hasConnected: s.hasConnected || state === "connected",
+				hasDisconnected:
+					s.hasDisconnected ||
+					state === "disconnected" ||
+					state === "reconnecting",
 			}));
 		},
 
@@ -327,7 +333,7 @@ export const useSocketStore = create<TSocketStore>()(
 
 		setLastError(error) {
 			_actionRef.current = "setLastError";
-			set({
+			set((s) => ({
 				lastError: error
 					? {
 							code: error.code,
@@ -336,7 +342,8 @@ export const useSocketStore = create<TSocketStore>()(
 							messageId: error.messageId,
 						}
 					: null,
-			});
+				hasDisconnected: s.hasDisconnected || error !== null,
+			}));
 		},
 	})),
 );
@@ -365,6 +372,10 @@ export function selectIsSubscribed(
 ): (state: TSocketStore) => boolean {
 	const key = `${type}:${channel}`;
 	return (state) => (state.subscriptionRefCounts[key] ?? 0) > 0;
+}
+
+export function selectHasDisconnected(state: TSocketStore): boolean {
+	return state.hasDisconnected;
 }
 
 export function selectLastError(

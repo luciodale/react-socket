@@ -1,11 +1,17 @@
 import { create } from "zustand";
-import type { TInspectorMode, TStateSnapshot } from "./types";
+import type { TSocketMessageFromClientToServer } from "../socket/types";
+import type {
+	TInspectorMode,
+	TOutgoingMessageEntry,
+	TStateSnapshot,
+} from "./types";
 
 type TInspectorStore = {
 	enabled: boolean;
 	panelOpen: boolean;
 	mode: TInspectorMode;
 	history: TStateSnapshot[];
+	outgoingLog: TOutgoingMessageEntry[];
 	selectedIndex: number;
 	panelHeight: number;
 	maxHistory: number;
@@ -14,6 +20,8 @@ type TInspectorStore = {
 	toggleEnabled: () => void;
 	setMode: (mode: TInspectorMode) => void;
 	pushSnapshot: (snapshot: TStateSnapshot) => void;
+	pushOutgoingMessage: (msg: TSocketMessageFromClientToServer) => void;
+	clearOutgoingLog: () => void;
 	setSelectedIndex: (index: number) => void;
 	setPanelHeight: (height: number) => void;
 	clearHistory: () => void;
@@ -34,6 +42,7 @@ export const useInspectorStore = create<TInspectorStore>()((set) => ({
 	panelOpen: false,
 	mode: "live",
 	history: [],
+	outgoingLog: [],
 	selectedIndex: -1,
 	panelHeight: Math.round(window.innerHeight * 0.4),
 	maxHistory: 500,
@@ -45,10 +54,34 @@ export const useInspectorStore = create<TInspectorStore>()((set) => ({
 	toggleEnabled() {
 		set((s) => {
 			if (s.enabled) {
-				return { enabled: false, history: [], selectedIndex: -1 };
+				return {
+					enabled: false,
+					history: [],
+					outgoingLog: [],
+					selectedIndex: -1,
+				};
 			}
 			return { enabled: true };
 		});
+	},
+
+	pushOutgoingMessage(msg) {
+		set((s) => {
+			const entry: TOutgoingMessageEntry = {
+				id: nextSnapshotId(),
+				timestamp: Date.now(),
+				message: msg,
+			};
+			const log =
+				s.outgoingLog.length >= s.maxHistory
+					? [...s.outgoingLog.slice(1), entry]
+					: [...s.outgoingLog, entry];
+			return { outgoingLog: log };
+		});
+	},
+
+	clearOutgoingLog() {
+		set({ outgoingLog: [] });
 	},
 
 	setMode(mode) {

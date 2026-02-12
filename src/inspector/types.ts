@@ -1,6 +1,7 @@
 import type {
 	TClientConversationMessage,
 	TConnectionState,
+	TSocketMessageFromClientToServer,
 	TStoredNotification,
 } from "../socket/types";
 
@@ -9,6 +10,7 @@ import type {
 export type TSocketStoreState = {
 	connectionState: TConnectionState;
 	hasConnected: boolean;
+	hasDisconnected: boolean;
 	conversationMessages: Record<string, TClientConversationMessage[]>;
 	notificationMessages: Record<string, TStoredNotification[]>;
 	subscriptionRefCounts: Record<string, number>;
@@ -20,6 +22,14 @@ export type TSocketStoreState = {
 		error?: string;
 		messageId?: string;
 	} | null;
+};
+
+// ── Outgoing message log entry ──────────────────────────────────────
+
+export type TOutgoingMessageEntry = {
+	id: number;
+	timestamp: number;
+	message: TSocketMessageFromClientToServer;
 };
 
 // ── History snapshot ────────────────────────────────────────────────

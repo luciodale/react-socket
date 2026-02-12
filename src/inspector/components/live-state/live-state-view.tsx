@@ -1,6 +1,7 @@
 import { ConnectionSection } from "./connection-section";
 import { ErrorSection } from "./error-section";
 import { MessagesSection } from "./messages-section";
+import { OutgoingMessagesSection } from "./outgoing-messages-section";
 import { QueueSection } from "./queue-section";
 import { SubscriptionsSection } from "./subscriptions-section";
 
@@ -10,6 +11,7 @@ export function LiveStateView() {
 			<ConnectionSection />
 			<SubscriptionsSection />
 			<MessagesSection />
+			<OutgoingMessagesSection />
 			<QueueSection />
 			<ErrorSection />
 		</div>

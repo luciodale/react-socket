@@ -12,8 +12,8 @@ export class BrowserWebSocketTransport implements IWebSocketTransport {
 		return this.ws?.readyState ?? WebSocket.CLOSED;
 	}
 
-	connect(url: string): void {
-		this.ws = new WebSocket(url);
+	connect(url: string, protocols?: string | string[]): void {
+		this.ws = new WebSocket(url, protocols);
 		this.ws.onopen = (e) => this.onopen?.(e);
 		this.ws.onclose = (e) => this.onclose?.(e);
 		this.ws.onmessage = (e) => this.onmessage?.(e);

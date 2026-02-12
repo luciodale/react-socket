@@ -37,11 +37,15 @@ export class WebSocketManager {
 	private readonly reconnectMaxAttempts: number;
 	private readonly reconnectBaseDelayMs: number;
 	private readonly reconnectMaxDelayMs: number;
+	private readonly token: string | undefined;
 
 	private readonly onMessage: TWebSocketManagerConfig["onMessage"];
 	private readonly onConnectionStateChange: TWebSocketManagerConfig["onConnectionStateChange"];
 	private readonly onError: TWebSocketManagerConfig["onError"];
 
+	private readonly sendListeners = new Set<
+		(msg: TSocketMessageFromClientToServer) => void
+	>();
 	private readonly subscriptionRefCounts = new Map<string, number>();
 	private readonly pendingSubscriptions = new Set<string>();
 	private readonly inFlightMessages = new Map<
@@ -69,6 +73,7 @@ export class WebSocketManager {
 			config.reconnectBaseDelayMs ?? RECONNECT_BASE_DELAY_MS;
 		this.reconnectMaxDelayMs =
 			config.reconnectMaxDelayMs ?? RECONNECT_MAX_DELAY_MS;
+		this.token = config.token;
 		this.onMessage = config.onMessage;
 		this.onConnectionStateChange = config.onConnectionStateChange;
 		this.onError = config.onError;
@@ -99,7 +104,7 @@ export class WebSocketManager {
 			// onerror is always followed by onclose — no action needed
 		};
 
-		this.transport.connect(this.url);
+		this.transport.connect(this.url, this.tokenProtocols());
 
 		if (typeof window !== "undefined") {
 			window.addEventListener("online", this.handleOnline);
@@ -201,6 +206,26 @@ export class WebSocketManager {
 
 	getQueueLength(): number {
 		return this.queue.length;
+	}
+
+	// ── Send listeners ───────────────────────────────────────────────
+
+	addSendListener(
+		cb: (msg: TSocketMessageFromClientToServer) => void,
+	): void {
+		this.sendListeners.add(cb);
+	}
+
+	removeSendListener(
+		cb: (msg: TSocketMessageFromClientToServer) => void,
+	): void {
+		this.sendListeners.delete(cb);
+	}
+
+	private notifySendListeners(msg: TSocketMessageFromClientToServer): void {
+		for (const cb of this.sendListeners) {
+			cb(msg);
+		}
 	}
 
 	// ── Private: handlers ─────────────────────────────────────────────
@@ -334,7 +359,7 @@ export class WebSocketManager {
 			this.transport.onerror = () => {
 				// onerror is always followed by onclose — no action needed
 			};
-			this.transport.connect(this.url);
+			this.transport.connect(this.url, this.tokenProtocols());
 		}, delay);
 	}
 
@@ -346,14 +371,18 @@ export class WebSocketManager {
 	}
 
 	private drainOutgoingQueue(): void {
-		this.queue = drainQueue(this.queue, (data) => {
-			try {
-				this.transport.send(data);
-				return true;
-			} catch {
-				return false;
-			}
-		});
+		this.queue = drainQueue(
+			this.queue,
+			(data) => {
+				try {
+					this.transport.send(data);
+					return true;
+				} catch {
+					return false;
+				}
+			},
+			(entry) => this.notifySendListeners(entry.payload),
+		);
 	}
 
 	// ── Private: in-flight ───────────────────────────────────────────
@@ -389,6 +418,7 @@ export class WebSocketManager {
 	private rawSend(msg: TSocketMessageFromClientToServer): boolean {
 		try {
 			this.transport.send(JSON.stringify(msg));
+			this.notifySendListeners(msg);
 			return true;
 		} catch {
 			this.queue = enqueue(this.queue, msg);
@@ -432,6 +462,10 @@ export class WebSocketManager {
 			clearTimeout(this.reconnectTimer);
 			this.reconnectTimer = null;
 		}
+	}
+
+	private tokenProtocols(): string[] | undefined {
+		return this.token ? ["access_token", this.token] : undefined;
 	}
 
 	private removeWindowListeners(): void {

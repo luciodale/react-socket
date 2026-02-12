@@ -176,7 +176,7 @@ export type TConnectionState =
 // ── Transport interface ─────────────────────────────────────────────
 
 export interface IWebSocketTransport {
-	connect(url: string): void;
+	connect(url: string, protocols?: string | string[]): void;
 	disconnect(code?: number, reason?: string): void;
 	send(data: string): void;
 	readonly readyState: number;
@@ -190,6 +190,7 @@ export interface IWebSocketTransport {
 
 export type TWebSocketManagerConfig = {
 	url: string;
+	token?: string;
 	transport?: IWebSocketTransport;
 	pingIntervalMs?: number;
 	pongTimeoutMs?: number;
