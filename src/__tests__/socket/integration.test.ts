@@ -1,25 +1,215 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getChannelFailedMessages } from "../../socket/failed-messages";
+import { create } from "zustand";
+import { createZustandAdapter } from "../../adapters/zustand";
 import { WebSocketManager } from "../../socket/manager";
-import { useSocketStore } from "../../socket/store";
-import type { TSocketMessageFromServerToClient } from "../../socket/types";
+import type { TStoreAdapter } from "../../socket/types";
 import { MockTransport } from "../helpers/mock-transport";
 
-function resetStore() {
-	useSocketStore.setState({
-		connectionState: "disconnected",
-		hasConnected: false,
-		conversationMessages: {},
-		notificationMessages: {},
-		subscriptionRefCounts: {},
-		pendingQueueLength: 0,
-		lastError: null,
-	});
+// ── Test domain types ──────────────────────────────────────────────
+
+type TContentBlock = { type: "text"; text: string };
+
+type TMessage = {
+	id: string;
+	sender: string;
+	content: TContentBlock[];
+	status: "pending" | "sent" | "undelivered";
+	undeliveredAt?: string;
+};
+
+type TTestState = {
+	messages: Record<string, TMessage[]>;
+};
+
+type TServerMsg =
+	| { action: "subscribe_ack"; type: string; channel: string }
+	| {
+			action: "message";
+			type: "conversation";
+			delivery: "event";
+			id: string;
+			channel: string;
+			sender: string;
+			content: TContentBlock[];
+	  }
+	| {
+			action: "message";
+			type: "conversation";
+			delivery: "dump";
+			channel: string;
+			messages: { id: string; sender: string; content: TContentBlock[] }[];
+	  }
+	| {
+			action: "message";
+			type: "conversation";
+			delivery: "error";
+			channel: string;
+			error: string;
+			message: string;
+			messageId?: string;
+	  };
+
+
+// ── Helpers ────────────────────────────────────────────────────────
+
+function createTestStore() {
+	const useStore = create<TTestState>()(() => ({
+		messages: {},
+	}));
+	return { useStore, adapter: createZustandAdapter(useStore) };
 }
 
+function createTestSystem(
+	transport: MockTransport,
+	adapter: TStoreAdapter<TTestState>,
+) {
+	const connectionStates: string[] = [];
+
+	const manager = new WebSocketManager({
+		url: "ws://test",
+		transport,
+		pingIntervalMs: 60_000,
+		pongTimeoutMs: 5_000,
+		reconnectBaseDelayMs: 10,
+		reconnectMaxAttempts: 3,
+		reconnectMaxDelayMs: 100,
+		serializeSubscribe: (type, channel) =>
+			JSON.stringify({ action: "subscribe", type, channel }),
+		serializeUnsubscribe: (type, channel) =>
+			JSON.stringify({ action: "unsubscribe", type, channel }),
+		onRawMessage(parsed) {
+			const msg = parsed as TServerMsg;
+
+			// resolve subscription acks
+			if (
+				msg.action === "subscribe_ack" &&
+				"type" in msg &&
+				"channel" in msg
+			) {
+				manager.resolvePendingSubscription(msg.type, msg.channel);
+			}
+
+			// resolve in-flight
+			if (msg.action === "message" && msg.type === "conversation") {
+				if (msg.delivery === "event") {
+					manager.ackInFlight(msg.id);
+				}
+				if (msg.delivery === "error" && msg.messageId) {
+					manager.ackInFlight(msg.messageId);
+				}
+			}
+
+			// user onMessage
+			if (msg.action !== "message" || msg.type !== "conversation")
+				return;
+
+			if (msg.delivery === "dump") {
+				adapter.set((s) => ({
+					messages: {
+						...s.messages,
+						[msg.channel]: msg.messages.map((m) => ({
+							...m,
+							status: "sent" as const,
+						})),
+					},
+				}));
+				return;
+			}
+
+			if (msg.delivery === "event") {
+				adapter.set((s) => {
+					const existing = s.messages[msg.channel] ?? [];
+					const idx = existing.findIndex((m) => m.id === msg.id);
+
+					if (idx !== -1) {
+						const updated = [...existing];
+						const { undeliveredAt: _, ...rest } = updated[idx];
+						updated[idx] = { ...rest, status: "sent" };
+						return {
+							messages: {
+								...s.messages,
+								[msg.channel]: updated,
+							},
+						};
+					}
+
+					return {
+						messages: {
+							...s.messages,
+							[msg.channel]: [
+								...existing,
+								{
+									id: msg.id,
+									sender: msg.sender,
+									content: msg.content,
+									status: "sent",
+								},
+							],
+						},
+					};
+				});
+				return;
+			}
+
+			if (msg.delivery === "error") {
+				adapter.set((s) => {
+					if (!msg.messageId) return s;
+					const existing = s.messages[msg.channel] ?? [];
+					const idx = existing.findIndex(
+						(m) => m.id === msg.messageId,
+					);
+					if (idx === -1) return s;
+					const updated = [...existing];
+					updated[idx] = {
+						...updated[idx],
+						status: "undelivered",
+						undeliveredAt: new Date().toISOString(),
+					};
+					return {
+						messages: {
+							...s.messages,
+							[msg.channel]: updated,
+						},
+					};
+				});
+			}
+		},
+		onConnectionStateChange(state) {
+			connectionStates.push(state);
+		},
+		onReady() {},
+		onInFlightDrop(ids) {
+			for (const id of ids) {
+				adapter.set((s) => {
+					for (const [channel, msgs] of Object.entries(s.messages)) {
+						const idx = msgs.findIndex((m) => m.id === id);
+						if (idx !== -1) {
+							const updated = [...msgs];
+							updated[idx] = {
+								...updated[idx],
+								status: "undelivered",
+								undeliveredAt: new Date().toISOString(),
+							};
+							return {
+								messages: {
+									...s.messages,
+									[channel]: updated,
+								},
+							};
+						}
+					}
+					return s;
+				});
+			}
+		},
+	});
+
+	return { manager, connectionStates };
+}
+
+// ── Setup / teardown ───────────────────────────────────────────────
+
 beforeEach(() => {
-	resetStore();
-	localStorage.clear();
 	vi.useFakeTimers();
 });
 
@@ -28,147 +218,188 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-describe("integration: manager + store", () => {
-	it("full flow: connect → subscribe → dump → send → event → reconnect", () => {
-		const transport = new MockTransport();
-		const store = useSocketStore;
+// ── Tests ──────────────────────────────────────────────────────────
 
-		const manager = new WebSocketManager({
-			url: "ws://test",
+describe("integration: manager + zustand adapter", () => {
+	it("full flow: connect -> subscribe -> dump -> send -> event -> reconnect", () => {
+		const transport = new MockTransport();
+		const { useStore, adapter } = createTestStore();
+		const { manager, connectionStates } = createTestSystem(
 			transport,
-			pingIntervalMs: 60_000,
-			pongTimeoutMs: 5_000,
-			reconnectBaseDelayMs: 10,
-			reconnectMaxAttempts: 3,
-			reconnectMaxDelayMs: 100,
-			onMessage: (msg) => store.getState().handleServerMessage(msg),
-			onConnectionStateChange: (state) =>
-				store.getState().setConnectionState(state),
-			onError: (err) => store.getState().setLastError(err),
-		});
+			adapter,
+		);
 
 		// 1. Connect
 		manager.connect();
-		expect(store.getState().connectionState).toBe("connecting");
+		expect(connectionStates).toContain("connecting");
 		transport.simulateOpen();
-		expect(store.getState().connectionState).toBe("connected");
+		expect(connectionStates).toContain("connected");
 
 		// 2. Subscribe
 		manager.subscribe("conversation", "ch1");
-		store.getState().incrementRefCount("conversation:ch1");
 		const subMsg = transport.sentMessages.find((m) =>
 			m.includes('"subscribe"'),
 		);
 		expect(subMsg).toBeDefined();
 
 		// 3. Receive dump
-		const dump: TSocketMessageFromServerToClient = {
-			action: "message",
-			type: "conversation",
-			delivery: "dump",
-			channel: "ch1",
-			messages: [
-				{
-					id: "hist1",
-					sender: "bot",
-					content: [{ type: "text", text: "Welcome!" }],
-				},
-			],
-		};
-		transport.simulateMessage(JSON.stringify(dump));
-		expect(store.getState().conversationMessages.ch1).toHaveLength(1);
-		expect(store.getState().conversationMessages.ch1[0].id).toBe("hist1");
-
-		// 4. Send a message
-		manager.send({
-			action: "message",
-			type: "conversation",
-			id: "msg1",
-			channel: "ch1",
-			message: "hello",
-		});
-		const sent = transport.sentMessages.find((m) => m.includes('"msg1"'));
-		expect(sent).toBeDefined();
-
-		// 5. Receive event
-		const event: TSocketMessageFromServerToClient = {
-			action: "message",
-			type: "conversation",
-			delivery: "event",
-			id: "msg1",
-			channel: "ch1",
-			sender: "user",
-			content: [{ type: "text", text: "hello" }],
-		};
-		transport.simulateMessage(JSON.stringify(event));
-		expect(store.getState().conversationMessages.ch1).toHaveLength(2);
-
-		// 6. Reconnect
-		transport.sentMessages = [];
-		transport.simulateClose(1006);
-		expect(store.getState().connectionState).toBe("reconnecting");
-
-		vi.advanceTimersByTime(200);
-		transport.simulateOpen();
-		expect(store.getState().connectionState).toBe("connected");
-
-		// Subscriptions restored
-		const restoredSubs = transport.sentMessages.filter((m) =>
-			m.includes('"subscribe"'),
-		);
-		expect(restoredSubs.length).toBeGreaterThanOrEqual(1);
-
-		// Cleanup
-		manager.dispose();
-	});
-
-	it("failed message lifecycle: persist → refresh → reappear after dump → dismiss on success", () => {
-		const transport = new MockTransport();
-		const store = useSocketStore;
-
-		function createManager() {
-			return new WebSocketManager({
-				url: "ws://test",
-				transport,
-				pingIntervalMs: 60_000,
-				pongTimeoutMs: 5_000,
-				reconnectBaseDelayMs: 10,
-				reconnectMaxAttempts: 3,
-				reconnectMaxDelayMs: 100,
-				onMessage: (msg) => store.getState().handleServerMessage(msg),
-				onConnectionStateChange: (state) =>
-					store.getState().setConnectionState(state),
-				onError: (err) => store.getState().setLastError(err),
-			});
-		}
-
-		// --- Session 1: connect, send, get error ---
-		const manager1 = createManager();
-		manager1.connect();
-		transport.simulateOpen();
-
-		// Subscribe + dump
-		manager1.subscribe("conversation", "ch1");
-		store.getState().incrementRefCount("conversation:ch1");
 		transport.simulateMessage(
 			JSON.stringify({
 				action: "message",
 				type: "conversation",
 				delivery: "dump",
 				channel: "ch1",
-				messages: [],
-			} satisfies TSocketMessageFromServerToClient),
+				messages: [
+					{
+						id: "hist1",
+						sender: "bot",
+						content: [{ type: "text", text: "Welcome!" }],
+					},
+				],
+			}),
+		);
+		expect(useStore.getState().messages.ch1).toHaveLength(1);
+		expect(useStore.getState().messages.ch1[0].id).toBe("hist1");
+
+		// 4. Send a message
+		const data = JSON.stringify({
+			action: "message",
+			type: "conversation",
+			id: "msg1",
+			channel: "ch1",
+			message: "hello",
+		});
+		manager.send("msg1", data);
+		const sent = transport.sentMessages.find((m) =>
+			m.includes('"msg1"'),
+		);
+		expect(sent).toBeDefined();
+
+		// 5. Receive event (echo of sent message)
+		transport.simulateMessage(
+			JSON.stringify({
+				action: "message",
+				type: "conversation",
+				delivery: "event",
+				id: "msg1",
+				channel: "ch1",
+				sender: "user",
+				content: [{ type: "text", text: "hello" }],
+			}),
+		);
+		expect(useStore.getState().messages.ch1).toHaveLength(2);
+		expect(
+			useStore.getState().messages.ch1.find((m) => m.id === "msg1")
+				?.status,
+		).toBe("sent");
+
+		// 6. Reconnect
+		transport.sentMessages = [];
+		transport.simulateClose(1006);
+		expect(connectionStates).toContain("reconnecting");
+
+		vi.advanceTimersByTime(200);
+		transport.simulateOpen();
+		expect(connectionStates[connectionStates.length - 1]).toBe(
+			"connected",
 		);
 
-		// Send optimistic message
-		store.getState().addOptimisticMessage("ch1", {
-			id: "fail-msg",
-			sender: "user",
-			content: [{ type: "text", text: "403" }],
-			status: "pending",
-		});
+		const restoredSubs = transport.sentMessages.filter((m) =>
+			m.includes('"subscribe"'),
+		);
+		expect(restoredSubs.length).toBeGreaterThanOrEqual(1);
 
-		// Server rejects with error
+		manager.dispose();
+	});
+
+	it("in-flight messages become undelivered on disconnect", () => {
+		const transport = new MockTransport();
+		const { useStore, adapter } = createTestStore();
+		const { manager } = createTestSystem(transport, adapter);
+
+		manager.connect();
+		transport.simulateOpen();
+		manager.subscribe("conversation", "ch1");
+
+		// optimistic insert
+		adapter.set((s) => ({
+			messages: {
+				...s.messages,
+				ch1: [
+					{
+						id: "msg1",
+						sender: "user",
+						content: [{ type: "text", text: "hello" }],
+						status: "pending" as const,
+					},
+				],
+			},
+		}));
+
+		manager.send(
+			"msg1",
+			JSON.stringify({
+				action: "message",
+				type: "conversation",
+				id: "msg1",
+				channel: "ch1",
+				message: "hello",
+			}),
+		);
+
+		// disconnect drops in-flight
+		transport.simulateClose(1006);
+
+		const msgs = useStore.getState().messages.ch1;
+		expect(msgs[0].status).toBe("undelivered");
+		expect(msgs[0].undeliveredAt).toBeDefined();
+
+		// reconnect -- messages stay undelivered (no auto-retry)
+		vi.advanceTimersByTime(200);
+		transport.simulateOpen();
+
+		expect(useStore.getState().messages.ch1[0].status).toBe(
+			"undelivered",
+		);
+
+		manager.dispose();
+	});
+
+	it("server error marks message as undelivered", () => {
+		const transport = new MockTransport();
+		const { useStore, adapter } = createTestStore();
+		const { manager } = createTestSystem(transport, adapter);
+
+		manager.connect();
+		transport.simulateOpen();
+		manager.subscribe("conversation", "ch1");
+
+		// optimistic insert
+		adapter.set(() => ({
+			messages: {
+				ch1: [
+					{
+						id: "fail-msg",
+						sender: "user",
+						content: [{ type: "text", text: "403" }],
+						status: "pending" as const,
+					},
+				],
+			},
+		}));
+
+		manager.send(
+			"fail-msg",
+			JSON.stringify({
+				action: "message",
+				type: "conversation",
+				id: "fail-msg",
+				channel: "ch1",
+				message: "403",
+			}),
+		);
+
+		// server rejects
 		transport.simulateMessage(
 			JSON.stringify({
 				action: "message",
@@ -178,45 +409,90 @@ describe("integration: manager + store", () => {
 				error: "token_expired",
 				message: "Token expired",
 				messageId: "fail-msg",
-			} satisfies TSocketMessageFromServerToClient),
+			}),
 		);
 
-		// Verify failed in-memory and in localStorage
-		expect(store.getState().conversationMessages.ch1[0].status).toBe(
-			"failed",
+		expect(useStore.getState().messages.ch1[0].status).toBe(
+			"undelivered",
 		);
-		const persisted = getChannelFailedMessages("ch1");
-		expect(persisted).toHaveLength(1);
-		expect(persisted[0].id).toBe("fail-msg");
 
-		manager1.dispose();
+		manager.dispose();
+	});
 
-		// --- Session 2: simulate refresh ---
-		resetStore(); // clears in-memory, localStorage persists
+	it("retry flow: undelivered -> pending -> send -> event confirms", () => {
+		const transport = new MockTransport();
+		const { useStore, adapter } = createTestStore();
+		const { manager } = createTestSystem(transport, adapter);
 
-		const transport2 = new MockTransport();
-		const manager2 = new WebSocketManager({
-			url: "ws://test",
-			transport: transport2,
-			pingIntervalMs: 60_000,
-			pongTimeoutMs: 5_000,
-			reconnectBaseDelayMs: 10,
-			reconnectMaxAttempts: 3,
-			reconnectMaxDelayMs: 100,
-			onMessage: (msg) => store.getState().handleServerMessage(msg),
-			onConnectionStateChange: (state) =>
-				store.getState().setConnectionState(state),
-			onError: (err) => store.getState().setLastError(err),
+		manager.connect();
+		transport.simulateOpen();
+		manager.subscribe("conversation", "ch1");
+
+		// start with undelivered message
+		adapter.set(() => ({
+			messages: {
+				ch1: [
+					{
+						id: "msg-1",
+						sender: "user",
+						content: [{ type: "text", text: "hello" }],
+						status: "undelivered" as const,
+						undeliveredAt: "2025-01-01T00:00:00.000Z",
+					},
+				],
+			},
+		}));
+
+		// user retries: mark pending
+		adapter.set((s) => {
+			const updated = [...s.messages.ch1];
+			const { undeliveredAt: _, ...rest } = updated[0];
+			updated[0] = { ...rest, status: "pending" };
+			return { messages: { ...s.messages, ch1: updated } };
 		});
 
-		manager2.connect();
-		transport2.simulateOpen();
+		manager.send(
+			"msg-1",
+			JSON.stringify({
+				action: "message",
+				type: "conversation",
+				id: "msg-1",
+				channel: "ch1",
+				message: "hello",
+			}),
+		);
 
-		manager2.subscribe("conversation", "ch1");
-		store.getState().incrementRefCount("conversation:ch1");
+		// server echoes
+		transport.simulateMessage(
+			JSON.stringify({
+				action: "message",
+				type: "conversation",
+				delivery: "event",
+				id: "msg-1",
+				channel: "ch1",
+				sender: "user",
+				content: [{ type: "text", text: "hello" }],
+			}),
+		);
 
-		// Dump arrives (server history, no failed msg)
-		transport2.simulateMessage(
+		const msgs = useStore.getState().messages.ch1;
+		expect(msgs[0].status).toBe("sent");
+		expect(msgs[0].undeliveredAt).toBeUndefined();
+
+		manager.dispose();
+	});
+
+	it("multiple channels work independently", () => {
+		const transport = new MockTransport();
+		const { useStore, adapter } = createTestStore();
+		const { manager } = createTestSystem(transport, adapter);
+
+		manager.connect();
+		transport.simulateOpen();
+		manager.subscribe("conversation", "ch1");
+		manager.subscribe("conversation", "ch2");
+
+		transport.simulateMessage(
 			JSON.stringify({
 				action: "message",
 				type: "conversation",
@@ -224,44 +500,139 @@ describe("integration: manager + store", () => {
 				channel: "ch1",
 				messages: [
 					{
-						id: "server-1",
+						id: "a",
 						sender: "bot",
-						content: [{ type: "text", text: "Welcome back" }],
+						content: [{ type: "text", text: "ch1" }],
 					},
 				],
-			} satisfies TSocketMessageFromServerToClient),
+			}),
 		);
 
-		// Failed message reappears from localStorage after dump
-		const msgs = store.getState().conversationMessages.ch1;
-		expect(msgs).toHaveLength(2);
-		expect(msgs[0]).toMatchObject({ id: "server-1", status: "sent" });
-		expect(msgs[1]).toMatchObject({ id: "fail-msg", status: "failed" });
+		transport.simulateMessage(
+			JSON.stringify({
+				action: "message",
+				type: "conversation",
+				delivery: "dump",
+				channel: "ch2",
+				messages: [
+					{
+						id: "b",
+						sender: "bot",
+						content: [{ type: "text", text: "ch2" }],
+					},
+					{
+						id: "c",
+						sender: "user",
+						content: [{ type: "text", text: "ch2-2" }],
+					},
+				],
+			}),
+		);
 
-		// --- Retry: optimistic message + server ack dismisses failed ---
-		store.getState().addOptimisticMessage("ch1", {
-			id: "success-msg",
-			sender: "user",
-			content: [{ type: "text", text: "retry worked" }],
-			status: "pending",
-		});
+		expect(useStore.getState().messages.ch1).toHaveLength(1);
+		expect(useStore.getState().messages.ch2).toHaveLength(2);
 
-		transport2.simulateMessage(
+		// event on ch1 doesn't affect ch2
+		transport.simulateMessage(
 			JSON.stringify({
 				action: "message",
 				type: "conversation",
 				delivery: "event",
-				id: "success-msg",
+				id: "d",
 				channel: "ch1",
 				sender: "user",
-				content: [{ type: "text", text: "retry worked" }],
-			} satisfies TSocketMessageFromServerToClient),
+				content: [{ type: "text", text: "new" }],
+			}),
 		);
 
-		const afterSuccess = store.getState().conversationMessages.ch1;
-		expect(afterSuccess.find((m) => m.id === "fail-msg")).toBeUndefined();
-		expect(getChannelFailedMessages("ch1")).toEqual([]);
+		expect(useStore.getState().messages.ch1).toHaveLength(2);
+		expect(useStore.getState().messages.ch2).toHaveLength(2);
 
-		manager2.dispose();
+		manager.dispose();
+	});
+
+	it("dump replaces existing channel messages", () => {
+		const transport = new MockTransport();
+		const { useStore, adapter } = createTestStore();
+		const { manager } = createTestSystem(transport, adapter);
+
+		manager.connect();
+		transport.simulateOpen();
+		manager.subscribe("conversation", "ch1");
+
+		// first dump
+		transport.simulateMessage(
+			JSON.stringify({
+				action: "message",
+				type: "conversation",
+				delivery: "dump",
+				channel: "ch1",
+				messages: [
+					{
+						id: "old",
+						sender: "bot",
+						content: [{ type: "text", text: "old" }],
+					},
+				],
+			}),
+		);
+		expect(useStore.getState().messages.ch1).toHaveLength(1);
+
+		// second dump replaces
+		transport.simulateMessage(
+			JSON.stringify({
+				action: "message",
+				type: "conversation",
+				delivery: "dump",
+				channel: "ch1",
+				messages: [
+					{
+						id: "new1",
+						sender: "bot",
+						content: [{ type: "text", text: "new1" }],
+					},
+					{
+						id: "new2",
+						sender: "user",
+						content: [{ type: "text", text: "new2" }],
+					},
+				],
+			}),
+		);
+
+		const msgs = useStore.getState().messages.ch1;
+		expect(msgs).toHaveLength(2);
+		expect(msgs[0].id).toBe("new1");
+		expect(msgs[1].id).toBe("new2");
+
+		manager.dispose();
+	});
+
+	it("subscription ack resolves pending subscription", () => {
+		const transport = new MockTransport();
+		const { adapter } = createTestStore();
+		const { manager } = createTestSystem(transport, adapter);
+
+		manager.connect();
+		transport.simulateOpen();
+		manager.subscribe("conversation", "ch1");
+
+		expect(manager.getPendingSubscriptions().has("conversation:ch1")).toBe(
+			true,
+		);
+
+		transport.simulateMessage(
+			JSON.stringify({
+				action: "subscribe_ack",
+				type: "conversation",
+				channel: "ch1",
+			}),
+		);
+
+		expect(manager.getPendingSubscriptions().has("conversation:ch1")).toBe(
+			false,
+		);
+
+		manager.dispose();
 	});
 });

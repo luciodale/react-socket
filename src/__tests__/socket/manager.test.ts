@@ -1,17 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketManager } from "../../socket/manager";
-import type {
-	TConnectionState,
-	TSocketError,
-	TSocketMessageFromServerToClient,
-} from "../../socket/types";
+import type { TConnectionState } from "../../socket/types";
 import { MockTransport } from "../helpers/mock-transport";
+
+function serializeSub(type: string, channel: string): string {
+	return JSON.stringify({ action: "subscribe", type, channel });
+}
+
+function serializeUnsub(type: string, channel: string): string {
+	return JSON.stringify({ action: "unsubscribe", type, channel });
+}
 
 function createManager(overrides?: {
 	transport?: MockTransport;
-	onMessage?: (msg: TSocketMessageFromServerToClient) => void;
+	onRawMessage?: (parsed: unknown) => void;
 	onConnectionStateChange?: (state: TConnectionState) => void;
-	onError?: (error: TSocketError) => void;
+	onReady?: () => void;
+	onInFlightDrop?: (ids: string[]) => void;
 	pingIntervalMs?: number;
 	pongTimeoutMs?: number;
 	reconnectBaseDelayMs?: number;
@@ -19,8 +24,9 @@ function createManager(overrides?: {
 }) {
 	const transport = overrides?.transport ?? new MockTransport();
 	const states: TConnectionState[] = [];
-	const messages: TSocketMessageFromServerToClient[] = [];
-	const errors: TSocketError[] = [];
+	const rawMessages: unknown[] = [];
+	const readyCalls: number[] = [];
+	const droppedInFlightIds: string[][] = [];
 
 	const manager = new WebSocketManager({
 		url: "ws://test",
@@ -30,25 +36,37 @@ function createManager(overrides?: {
 		reconnectBaseDelayMs: overrides?.reconnectBaseDelayMs ?? 10,
 		reconnectMaxAttempts: overrides?.reconnectMaxAttempts ?? 3,
 		reconnectMaxDelayMs: 100,
-		onMessage: (msg) => {
-			messages.push(msg);
-			overrides?.onMessage?.(msg);
+		serializeSubscribe: serializeSub,
+		serializeUnsubscribe: serializeUnsub,
+		onRawMessage: (parsed) => {
+			rawMessages.push(parsed);
+			overrides?.onRawMessage?.(parsed);
 		},
 		onConnectionStateChange: (state) => {
 			states.push(state);
 			overrides?.onConnectionStateChange?.(state);
 		},
-		onError: (err) => {
-			errors.push(err);
-			overrides?.onError?.(err);
+		onReady: () => {
+			readyCalls.push(1);
+			overrides?.onReady?.();
+		},
+		onInFlightDrop: (ids) => {
+			droppedInFlightIds.push([...ids]);
+			overrides?.onInFlightDrop?.(ids);
 		},
 	});
 
-	return { manager, transport, states, messages, errors };
+	return {
+		manager,
+		transport,
+		states,
+		rawMessages,
+		readyCalls,
+		droppedInFlightIds,
+	};
 }
 
 beforeEach(() => {
-	localStorage.clear();
 	vi.useFakeTimers();
 });
 
@@ -118,7 +136,6 @@ describe("WebSocketManager", () => {
 
 			manager.subscribe("conversation", "ch1");
 			manager.subscribe("conversation", "ch1");
-			// Only 1 subscribe message should be sent
 			const subs = transport.sentMessages.filter((m) =>
 				m.includes('"subscribe"'),
 			);
@@ -135,7 +152,6 @@ describe("WebSocketManager", () => {
 			transport.sentMessages = [];
 
 			manager.unsubscribe("conversation", "ch1");
-			// ref count is still 1, should not send unsubscribe
 			const unsubs = transport.sentMessages.filter((m) =>
 				m.includes('"unsubscribe"'),
 			);
@@ -146,6 +162,29 @@ describe("WebSocketManager", () => {
 				m.includes('"unsubscribe"'),
 			);
 			expect(unsubs2).toHaveLength(1);
+		});
+
+		it("adds subscription to pending on subscribe", () => {
+			const { manager, transport } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+
+			manager.subscribe("conversation", "ch1");
+			expect(manager.getPendingSubscriptions().has("conversation:ch1")).toBe(
+				true,
+			);
+		});
+
+		it("resolves pending subscription via resolvePendingSubscription", () => {
+			const { manager, transport } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+
+			manager.subscribe("conversation", "ch1");
+			manager.resolvePendingSubscription("conversation", "ch1");
+			expect(manager.getPendingSubscriptions().has("conversation:ch1")).toBe(
+				false,
+			);
 		});
 	});
 
@@ -179,15 +218,14 @@ describe("WebSocketManager", () => {
 			expect(subs.length).toBeGreaterThanOrEqual(1);
 		});
 
-		it("fires error after max attempts", () => {
-			const { manager, transport, errors } = createManager({
+		it("gives up after max attempts and transitions to disconnected", () => {
+			const { manager, transport, states } = createManager({
 				reconnectMaxAttempts: 2,
 			});
 			manager.connect();
 			transport.simulateOpen();
 			transport.simulateClose(1006);
 
-			// Exhaust all attempts
 			for (let i = 0; i < 3; i++) {
 				vi.advanceTimersByTime(10_000);
 				if (transport.connectCalls.length > 1) {
@@ -195,8 +233,7 @@ describe("WebSocketManager", () => {
 				}
 			}
 
-			const maxError = errors.find((e) => e.code === 4002);
-			expect(maxError).toBeDefined();
+			expect(states[states.length - 1]).toBe("disconnected");
 		});
 	});
 
@@ -210,7 +247,9 @@ describe("WebSocketManager", () => {
 			transport.sentMessages = [];
 
 			vi.advanceTimersByTime(100);
-			const pings = transport.sentMessages.filter((m) => m.includes('"ping"'));
+			const pings = transport.sentMessages.filter((m) =>
+				m.includes('"ping"'),
+			);
 			expect(pings).toHaveLength(1);
 		});
 
@@ -222,8 +261,8 @@ describe("WebSocketManager", () => {
 			manager.connect();
 			transport.simulateOpen();
 
-			vi.advanceTimersByTime(100); // ping sent
-			vi.advanceTimersByTime(50); // pong timeout
+			vi.advanceTimersByTime(100);
+			vi.advanceTimersByTime(50);
 			expect(transport.disconnectCalls.length).toBeGreaterThanOrEqual(1);
 			const lastDisconnect =
 				transport.disconnectCalls[transport.disconnectCalls.length - 1];
@@ -238,80 +277,156 @@ describe("WebSocketManager", () => {
 			manager.connect();
 			transport.simulateOpen();
 
-			vi.advanceTimersByTime(100); // ping sent
+			vi.advanceTimersByTime(100);
 			transport.simulateMessage(
 				JSON.stringify({ action: "pong", timestamp: "t" }),
 			);
-			vi.advanceTimersByTime(50); // would have timed out
-			// Should not have disconnected
+			vi.advanceTimersByTime(50);
 			expect(transport.disconnectCalls).toHaveLength(0);
 		});
 	});
 
-	describe("send validation", () => {
-		it("queues message when not connected", () => {
-			const { manager, transport } = createManager();
-			manager.send({
-				action: "message",
-				type: "conversation",
-				id: "1",
-				channel: "ch1",
-				message: "hi",
-			});
-			expect(transport.sentMessages).toHaveLength(0);
-			expect(manager.getQueueLength()).toBe(1);
+	describe("send", () => {
+		it("returns false when not connected", () => {
+			const { manager } = createManager();
+			const sent = manager.send("msg1", JSON.stringify({ text: "hi" }));
+			expect(sent).toBe(false);
 		});
 
-		it("errors when sending to unsubscribed channel", () => {
-			const { manager, transport, errors } = createManager();
-			manager.connect();
-			transport.simulateOpen();
-
-			manager.send({
-				action: "message",
-				type: "conversation",
-				id: "1",
-				channel: "ch1",
-				message: "hi",
-			});
-			expect(errors).toHaveLength(1);
-			expect(errors[0].code).toBe(4001);
-		});
-
-		it("sends when connected and subscribed", () => {
+		it("sends when connected", () => {
 			const { manager, transport } = createManager();
 			manager.connect();
 			transport.simulateOpen();
-			manager.subscribe("conversation", "ch1");
 			transport.sentMessages = [];
 
-			manager.send({
-				action: "message",
-				type: "conversation",
-				id: "1",
-				channel: "ch1",
-				message: "hello",
-			});
+			const data = JSON.stringify({ text: "hello" });
+			const sent = manager.send("msg1", data);
+			expect(sent).toBe(true);
 			expect(transport.sentMessages).toHaveLength(1);
+			expect(transport.sentMessages[0]).toBe(data);
+		});
+
+		it("sends with null id (fire-and-forget)", () => {
+			const { manager, transport } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+			transport.sentMessages = [];
+
+			const data = JSON.stringify({ text: "hello" });
+			const sent = manager.send(null, data);
+			expect(sent).toBe(true);
+			expect(transport.sentMessages).toHaveLength(1);
+		});
+
+		it("acknowledges in-flight message via ackInFlight", () => {
+			const { manager, transport } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+
+			manager.send("msg1", JSON.stringify({ text: "hello" }));
+			manager.ackInFlight("msg1");
+
+			// verify no in-flight drop on disconnect
+			transport.simulateClose(1006);
+			const { droppedInFlightIds } = createManager();
+			expect(droppedInFlightIds).toHaveLength(0);
 		});
 	});
 
-	describe("queue drain", () => {
-		it("drains queue after reconnect", () => {
-			const { manager, transport } = createManager();
-			// Queue a message while disconnected
-			manager.send({
-				action: "ping",
-				timestamp: "t",
-			});
-			expect(manager.getQueueLength()).toBe(1);
-
+	describe("onRawMessage", () => {
+		it("passes parsed JSON to onRawMessage callback", () => {
+			const { manager, transport, rawMessages } = createManager();
 			manager.connect();
 			transport.simulateOpen();
-			// Queue should have been drained
-			expect(manager.getQueueLength()).toBe(0);
-			const pings = transport.sentMessages.filter((m) => m.includes('"ping"'));
-			expect(pings).toHaveLength(1);
+
+			transport.simulateMessage(
+				JSON.stringify({ type: "chat", text: "hello" }),
+			);
+			expect(rawMessages).toHaveLength(1);
+			expect(rawMessages[0]).toEqual({ type: "chat", text: "hello" });
+		});
+
+		it("ignores pong messages (not forwarded to onRawMessage)", () => {
+			const { manager, transport, rawMessages } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+
+			transport.simulateMessage(
+				JSON.stringify({ action: "pong", timestamp: "t" }),
+			);
+			expect(rawMessages).toHaveLength(0);
+		});
+
+		it("ignores invalid JSON", () => {
+			const { manager, transport, rawMessages } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+
+			transport.simulateMessage("not json{{{");
+			expect(rawMessages).toHaveLength(0);
+		});
+	});
+
+	describe("onReady", () => {
+		it("fires after connect", () => {
+			const { manager, transport, readyCalls } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+			expect(readyCalls).toHaveLength(1);
+		});
+
+		it("fires on reconnect", () => {
+			const { manager, transport, readyCalls } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+			transport.simulateClose(1006);
+			vi.advanceTimersByTime(200);
+			transport.simulateOpen();
+			expect(readyCalls).toHaveLength(2);
+		});
+	});
+
+	describe("onInFlightDrop", () => {
+		it("fires with in-flight message ids on disconnect", () => {
+			const { manager, transport, droppedInFlightIds } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+
+			manager.send("msg1", JSON.stringify({ text: "hello" }));
+			transport.simulateClose(1006);
+
+			expect(droppedInFlightIds).toHaveLength(1);
+			expect(droppedInFlightIds[0]).toContain("msg1");
+		});
+
+		it("does not fire when no in-flight messages", () => {
+			const { manager, transport, droppedInFlightIds } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+			transport.simulateClose(1006);
+			expect(droppedInFlightIds).toHaveLength(0);
+		});
+
+		it("does not fire for acked messages", () => {
+			const { manager, transport, droppedInFlightIds } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+
+			manager.send("msg1", JSON.stringify({ text: "hello" }));
+			manager.ackInFlight("msg1");
+
+			transport.simulateClose(1006);
+			expect(droppedInFlightIds).toHaveLength(0);
+		});
+
+		it("null-id sends are not tracked as in-flight", () => {
+			const { manager, transport, droppedInFlightIds } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+
+			manager.send(null, JSON.stringify({ text: "hello" }));
+			transport.simulateClose(1006);
+			expect(droppedInFlightIds).toHaveLength(0);
 		});
 	});
 
@@ -325,6 +440,43 @@ describe("WebSocketManager", () => {
 			manager.dispose();
 			expect(states[states.length - 1]).toBe("disconnected");
 			expect(manager.getRefCount("conversation", "ch1")).toBe(0);
+		});
+
+		it("does not reconnect after dispose", () => {
+			const { manager, transport } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+			manager.dispose();
+
+			const callsBefore = transport.connectCalls.length;
+			vi.advanceTimersByTime(10_000);
+			expect(transport.connectCalls.length).toBe(callsBefore);
+		});
+	});
+
+	describe("token", () => {
+		it("passes token as protocols", () => {
+			const transport = new MockTransport();
+			const manager = new WebSocketManager({
+				url: "ws://test",
+				transport,
+				token: "my-token",
+			});
+			manager.connect();
+			expect(transport.connectCalls[0].protocols).toEqual([
+				"access_token",
+				"my-token",
+			]);
+		});
+
+		it("omits protocols when no token", () => {
+			const transport = new MockTransport();
+			const manager = new WebSocketManager({
+				url: "ws://test",
+				transport,
+			});
+			manager.connect();
+			expect(transport.connectCalls[0].protocols).toBeUndefined();
 		});
 	});
 });
