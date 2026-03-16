@@ -1,0 +1,36 @@
+{
+	"name": "@luciodale/react-socket",
+	"version": "0.0.1",
+	"author": "Lucio D'Alessandro",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/luciodale/react-socket"
+	},
+	"main": "dist/react-socket.umd.js",
+	"module": "dist/react-socket.es.js",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/react-socket.es.js",
+			"require": "./dist/react-socket.umd.js"
+		}
+	},
+	"peerDependencies": {
+		"react": ">=16 || >=17 || >=18 || >=19"
+	},
+	"description": "Lightweight WebSocket manager for React with reconnection, subscriptions, and in-flight tracking.",
+	"files": [
+		"dist",
+		"README.md"
+	],
+	"keywords": [
+		"react",
+		"websocket",
+		"socket",
+		"real-time",
+		"reconnection",
+		"subscriptions"
+	],
+	"license": "MIT",
+	"types": "dist/index.d.ts"
+}

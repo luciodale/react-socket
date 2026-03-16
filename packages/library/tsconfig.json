@@ -1,0 +1,35 @@
+{
+	"compilerOptions": {
+		"target": "ESNext",
+		"lib": ["ESNext", "DOM", "DOM.Iterable"],
+		"module": "ESNext",
+		"skipLibCheck": true,
+
+		/* Bundler mode */
+		"moduleResolution": "bundler",
+		"resolveJsonModule": true,
+		"isolatedModules": true,
+		"noEmit": false,
+		"jsx": "react-jsx",
+
+		/* Linting */
+		"strict": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noFallthroughCasesInSwitch": true,
+
+		/* Library specific */
+		"declaration": true,
+		"declarationMap": true,
+		"outDir": "dist",
+		"composite": true
+	},
+	"include": ["src"],
+	"exclude": [
+		"node_modules",
+		"dist",
+		"src/**/*.test.ts",
+		"src/**/*.test.tsx",
+		"src/__tests__"
+	]
+}
