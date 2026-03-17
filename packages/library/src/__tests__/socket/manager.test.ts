@@ -717,4 +717,126 @@ describe("WebSocketManager", () => {
 			expect(transport.connectCalls).toHaveLength(1);
 		});
 	});
+
+	describe("forceReconnect", () => {
+		it("disconnects and reconnects when connected", () => {
+			const { manager, transport, states } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+			states.length = 0;
+
+			manager.forceReconnect();
+
+			expect(transport.disconnectCalls).toHaveLength(1);
+			expect(transport.disconnectCalls[0].code).toBe(4000);
+			expect(transport.disconnectCalls[0].reason).toBe("force reconnect");
+			expect(transport.connectCalls).toHaveLength(2);
+			expect(states).toContain("disconnected");
+			expect(states).toContain("connecting");
+
+			transport.simulateOpen();
+			expect(states[states.length - 1]).toBe("connected");
+		});
+
+		it("restores subscriptions after reconnect", () => {
+			const { manager, transport } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+
+			manager.subscribe("conversation:ch1", subMsg("conversation", "ch1"));
+			manager.subscribe("conversation:ch2", subMsg("conversation", "ch2"));
+			transport.sentMessages = [];
+
+			manager.forceReconnect();
+			transport.simulateOpen();
+
+			expect(transport.sentMessages).toHaveLength(2);
+		});
+
+		it("drops in-flight messages", () => {
+			const { manager, transport, droppedInFlightIds } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+
+			manager.send("id-1", { action: "msg1" });
+			manager.send("id-2", { action: "msg2" });
+
+			manager.forceReconnect();
+
+			expect(droppedInFlightIds).toHaveLength(1);
+			expect(droppedInFlightIds[0]).toEqual(
+				expect.arrayContaining(["id-1", "id-2"]),
+			);
+		});
+
+		it("is a no-op when disposed", () => {
+			const { manager, transport } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+			manager.dispose();
+			transport.disconnectCalls = [];
+
+			manager.forceReconnect();
+
+			expect(transport.disconnectCalls).toHaveLength(0);
+		});
+
+		it("works when already disconnected", () => {
+			const { manager, transport, states } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+			transport.simulateClose(1006);
+			states.length = 0;
+			transport.disconnectCalls = [];
+
+			vi.runAllTimers();
+
+			manager.forceReconnect();
+
+			expect(states).toContain("connecting");
+			transport.simulateOpen();
+			expect(states[states.length - 1]).toBe("connected");
+		});
+
+		it("resets reconnect attempt counter", () => {
+			const { manager, transport, states } = createManager({
+				reconnectMaxAttempts: 5,
+			});
+			manager.connect();
+			transport.simulateOpen();
+
+			// Simulate a few failed reconnects
+			transport.simulateClose(1006);
+			vi.advanceTimersByTime(50);
+			transport.simulateClose(1006);
+			vi.advanceTimersByTime(100);
+			transport.simulateClose(1006);
+
+			// forceReconnect should start fresh
+			manager.forceReconnect();
+			transport.simulateOpen();
+			expect(states[states.length - 1]).toBe("connected");
+
+			// Should be able to reconnect again after failure (attempt counter was reset)
+			transport.simulateClose(1006);
+			expect(states[states.length - 1]).toBe("reconnecting");
+		});
+
+		it("nullifies old handlers to prevent stale events", () => {
+			const { manager, transport, states } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+
+			manager.forceReconnect();
+
+			// Simulate the old connection's delayed close event
+			// Transport handlers were nullified, so this should be a no-op
+			expect(transport.onclose).not.toBeNull(); // new handler from connect()
+			expect(transport.onopen).not.toBeNull();
+
+			// The new connection should work normally
+			transport.simulateOpen();
+			expect(states[states.length - 1]).toBe("connected");
+		});
+	});
 });

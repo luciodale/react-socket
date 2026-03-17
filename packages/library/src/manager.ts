@@ -129,6 +129,34 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 		this.removeWindowListeners();
 	}
 
+	forceReconnect(): void {
+		if (this.disposed) return;
+		this.clearTimers();
+		this.pendingSubscriptions.clear();
+
+		if (this.inFlightMessages.size > 0) {
+			const ids = Array.from(this.inFlightMessages.keys());
+			this.onInFlightDrop?.(ids);
+			this.inFlightMessages.clear();
+			this.emitDebug({ type: "in-flight-drop", ids });
+		}
+
+		// Detach old handlers to prevent stale close events from interfering
+		this.transport.onclose = null;
+		this.transport.onopen = null;
+		this.transport.onmessage = null;
+		this.transport.onerror = null;
+		this.transport.disconnect(4000, "force reconnect");
+
+		this.setConnectionState("disconnected");
+		this.removeWindowListeners();
+
+		// Start fresh connection
+		this.intentionalClose = false;
+		this.reconnectAttempt = 0;
+		this.connect();
+	}
+
 	dispose(): void {
 		this.disposed = true;
 		this.disconnect();
