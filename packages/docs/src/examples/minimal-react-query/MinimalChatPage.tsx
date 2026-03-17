@@ -42,6 +42,9 @@ const queryClient = new QueryClient({
 	defaultOptions: { queries: { staleTime: Number.POSITIVE_INFINITY } },
 });
 
+function chatQueryKey(channelId: string) {
+	return JSON.stringify(["message", channelId]);
+}
 // ── Manager ─────────────────────────────────────────────────────────
 
 const manager = new WebSocketManager<TClientMsg, TServerMsg>({
@@ -59,14 +62,14 @@ const manager = new WebSocketManager<TClientMsg, TServerMsg>({
 
 	onMessage(msg) {
 		if (msg.action === "subscribe_ack") {
-			manager.resolvePendingSubscription(`${msg.type}:${msg.channel}`);
+			manager.resolvePendingSubscription(chatQueryKey(msg.channel));
 			return;
 		}
 
 		if (msg.action === "message") {
 			manager.ackInFlight(msg.id);
 			queryClient.setQueryData<TMessage[]>(
-				[`${msg.type}:${msg.channel}`],
+				[chatQueryKey(msg.channel)],
 				(prev) => [
 					...(prev ?? []),
 					{ id: msg.id, sender: msg.sender, text: msg.text },
@@ -79,8 +82,24 @@ const manager = new WebSocketManager<TClientMsg, TServerMsg>({
 // ── Hooks ────────────────────────────────────────────────────────────
 
 function useMessages(channel: string): TMessage[] {
+	const chatQueryKeyString = chatQueryKey(channel);
+	useEffect(() => {
+		manager.subscribe(chatQueryKeyString, {
+			action: "subscribe",
+			type: "conversation",
+			channel,
+		});
+		return () => {
+			manager.unsubscribe(chatQueryKeyString, {
+				action: "unsubscribe",
+				type: "conversation",
+				channel,
+			});
+		};
+	}, [channel]);
+
 	const { data } = useQuery<TMessage[]>({
-		queryKey: ["messages", channel],
+		queryKey: [chatQueryKeyString],
 		queryFn: () => [],
 		staleTime: Number.POSITIVE_INFINITY,
 	});
@@ -115,21 +134,6 @@ function ChatRoom({ channel }: { channel: string }) {
 	const [input, setInput] = useState("");
 	const connectionState = useConnectionState(manager);
 	const { messages, sendMessage } = useChat(channel);
-
-	useEffect(() => {
-		manager.subscribe(`conversation:${channel}`, {
-			action: "subscribe",
-			type: "conversation",
-			channel,
-		});
-		return () => {
-			manager.unsubscribe(`conversation:${channel}`, {
-				action: "unsubscribe",
-				type: "conversation",
-				channel,
-			});
-		};
-	}, [channel]);
 
 	function handleSend() {
 		if (!input.trim()) return;
