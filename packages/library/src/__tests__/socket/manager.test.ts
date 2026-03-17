@@ -3,23 +3,35 @@ import { WebSocketManager } from "../../manager";
 import type { TConnectionState } from "../../types";
 import { MockTransport } from "../helpers/mock-transport";
 
-function serializeSub(type: string, channel: string): string {
-	return JSON.stringify({ action: "subscribe", type, channel });
+// ── Test types ──────────────────────────────────────────────────────
+
+type TTestClientMsg = Record<string, unknown>;
+type TTestServerMsg = Record<string, unknown>;
+
+const testSerialization = {
+	serialize: (msg: TTestClientMsg) => JSON.stringify(msg),
+	deserialize: (raw: string) => JSON.parse(raw) as TTestServerMsg,
+};
+
+// ── Helpers ─────────────────────────────────────────────────────────
+
+function subMsg(type: string, channel: string): TTestClientMsg {
+	return { action: "subscribe", type, channel };
 }
 
-function serializeUnsub(type: string, channel: string): string {
-	return JSON.stringify({ action: "unsubscribe", type, channel });
+function unsubMsg(type: string, channel: string): TTestClientMsg {
+	return { action: "unsubscribe", type, channel };
 }
 
 function createManager(overrides?: {
 	transport?: MockTransport;
-	onMessage?: (parsed: unknown) => void;
+	onMessage?: (msg: TTestServerMsg) => void;
 	onConnectionStateChange?: (state: TConnectionState) => void;
 	onReady?: () => void;
 	onInFlightDrop?: (ids: string[]) => void;
 	onLastUnsubscribe?: (key: string) => void;
-	serializePing?: () => string;
-	isPong?: (parsed: unknown) => boolean;
+	ping?: TTestClientMsg;
+	isPong?: (msg: TTestServerMsg) => boolean;
 	pingIntervalMs?: number;
 	pongTimeoutMs?: number;
 	reconnectBaseDelayMs?: number;
@@ -27,11 +39,12 @@ function createManager(overrides?: {
 }) {
 	const transport = overrides?.transport ?? new MockTransport();
 	const states: TConnectionState[] = [];
-	const rawMessages: unknown[] = [];
+	const rawMessages: TTestServerMsg[] = [];
 	const readyCalls: number[] = [];
 	const droppedInFlightIds: string[][] = [];
 
-	const manager = new WebSocketManager({
+	const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+		...testSerialization,
 		url: "ws://test",
 		transport,
 		pingIntervalMs: overrides?.pingIntervalMs ?? 60_000,
@@ -39,11 +52,11 @@ function createManager(overrides?: {
 		reconnectBaseDelayMs: overrides?.reconnectBaseDelayMs ?? 10,
 		reconnectMaxAttempts: overrides?.reconnectMaxAttempts ?? 3,
 		reconnectMaxDelayMs: 100,
-		serializePing: overrides?.serializePing,
+		ping: overrides?.ping,
 		isPong: overrides?.isPong,
-		onMessage: (parsed) => {
-			rawMessages.push(parsed);
-			overrides?.onMessage?.(parsed);
+		onMessage: (msg) => {
+			rawMessages.push(msg);
+			overrides?.onMessage?.(msg);
 		},
 		onConnectionStateChange: (state) => {
 			states.push(state);
@@ -122,8 +135,7 @@ describe("WebSocketManager", () => {
 			transport.simulateOpen();
 			transport.sentMessages = [];
 
-			const data = serializeSub("conversation", "ch1");
-			manager.subscribe("conversation:ch1", data);
+			manager.subscribe("conversation:ch1", subMsg("conversation", "ch1"));
 			expect(transport.sentMessages).toHaveLength(1);
 			const msg = JSON.parse(transport.sentMessages[0]);
 			expect(msg).toEqual({
@@ -139,9 +151,8 @@ describe("WebSocketManager", () => {
 			transport.simulateOpen();
 			transport.sentMessages = [];
 
-			const data = serializeSub("conversation", "ch1");
-			manager.subscribe("conversation:ch1", data);
-			manager.subscribe("conversation:ch1", data);
+			manager.subscribe("conversation:ch1", subMsg("conversation", "ch1"));
+			manager.subscribe("conversation:ch1", subMsg("conversation", "ch1"));
 			const subs = transport.sentMessages.filter((m) =>
 				m.includes('"subscribe"'),
 			);
@@ -153,19 +164,17 @@ describe("WebSocketManager", () => {
 			manager.connect();
 			transport.simulateOpen();
 
-			const subData = serializeSub("conversation", "ch1");
-			const unsubData = serializeUnsub("conversation", "ch1");
-			manager.subscribe("conversation:ch1", subData);
-			manager.subscribe("conversation:ch1", subData);
+			manager.subscribe("conversation:ch1", subMsg("conversation", "ch1"));
+			manager.subscribe("conversation:ch1", subMsg("conversation", "ch1"));
 			transport.sentMessages = [];
 
-			manager.unsubscribe("conversation:ch1", unsubData);
+			manager.unsubscribe("conversation:ch1", unsubMsg("conversation", "ch1"));
 			const unsubs = transport.sentMessages.filter((m) =>
 				m.includes('"unsubscribe"'),
 			);
 			expect(unsubs).toHaveLength(0);
 
-			manager.unsubscribe("conversation:ch1", unsubData);
+			manager.unsubscribe("conversation:ch1", unsubMsg("conversation", "ch1"));
 			const unsubs2 = transport.sentMessages.filter((m) =>
 				m.includes('"unsubscribe"'),
 			);
@@ -177,10 +186,7 @@ describe("WebSocketManager", () => {
 			manager.connect();
 			transport.simulateOpen();
 
-			manager.subscribe(
-				"conversation:ch1",
-				serializeSub("conversation", "ch1"),
-			);
+			manager.subscribe("conversation:ch1", subMsg("conversation", "ch1"));
 			expect(manager.getPendingSubscriptions().has("conversation:ch1")).toBe(
 				true,
 			);
@@ -191,10 +197,7 @@ describe("WebSocketManager", () => {
 			manager.connect();
 			transport.simulateOpen();
 
-			manager.subscribe(
-				"conversation:ch1",
-				serializeSub("conversation", "ch1"),
-			);
+			manager.subscribe("conversation:ch1", subMsg("conversation", "ch1"));
 			manager.resolvePendingSubscription("conversation:ch1");
 			expect(manager.getPendingSubscriptions().has("conversation:ch1")).toBe(
 				false,
@@ -219,10 +222,7 @@ describe("WebSocketManager", () => {
 			const { manager, transport } = createManager();
 			manager.connect();
 			transport.simulateOpen();
-			manager.subscribe(
-				"conversation:ch1",
-				serializeSub("conversation", "ch1"),
-			);
+			manager.subscribe("conversation:ch1", subMsg("conversation", "ch1"));
 			transport.sentMessages = [];
 
 			transport.simulateClose(1006);
@@ -256,16 +256,8 @@ describe("WebSocketManager", () => {
 
 	describe("ping/pong", () => {
 		const pingConfig = {
-			serializePing: () =>
-				JSON.stringify({
-					action: "ping",
-					timestamp: new Date().toISOString(),
-				}),
-			isPong: (p: unknown) =>
-				typeof p === "object" &&
-				p !== null &&
-				"action" in p &&
-				(p as { action: unknown }).action === "pong",
+			ping: { action: "ping", timestamp: "now" } as TTestClientMsg,
+			isPong: (msg: TTestServerMsg) => msg.action === "pong",
 		};
 
 		it("sends ping at interval", () => {
@@ -282,7 +274,7 @@ describe("WebSocketManager", () => {
 			expect(pings).toHaveLength(1);
 		});
 
-		it("does not send ping when serializePing is not provided", () => {
+		it("does not send ping when ping is not provided", () => {
 			const { manager, transport } = createManager({
 				pingIntervalMs: 100,
 			});
@@ -332,7 +324,7 @@ describe("WebSocketManager", () => {
 	describe("send", () => {
 		it("returns false when not connected", () => {
 			const { manager } = createManager();
-			const sent = manager.send("msg1", JSON.stringify({ text: "hi" }));
+			const sent = manager.send("msg1", { text: "hi" });
 			expect(sent).toBe(false);
 		});
 
@@ -342,11 +334,11 @@ describe("WebSocketManager", () => {
 			transport.simulateOpen();
 			transport.sentMessages = [];
 
-			const data = JSON.stringify({ text: "hello" });
-			const sent = manager.send("msg1", data);
+			const msg = { text: "hello" };
+			const sent = manager.send("msg1", msg);
 			expect(sent).toBe(true);
 			expect(transport.sentMessages).toHaveLength(1);
-			expect(transport.sentMessages[0]).toBe(data);
+			expect(JSON.parse(transport.sentMessages[0])).toEqual(msg);
 		});
 
 		it("sends with null id (fire-and-forget)", () => {
@@ -355,8 +347,7 @@ describe("WebSocketManager", () => {
 			transport.simulateOpen();
 			transport.sentMessages = [];
 
-			const data = JSON.stringify({ text: "hello" });
-			const sent = manager.send(null, data);
+			const sent = manager.send(null, { text: "hello" });
 			expect(sent).toBe(true);
 			expect(transport.sentMessages).toHaveLength(1);
 		});
@@ -366,7 +357,7 @@ describe("WebSocketManager", () => {
 			manager.connect();
 			transport.simulateOpen();
 
-			manager.send("msg1", JSON.stringify({ text: "hello" }));
+			manager.send("msg1", { text: "hello" });
 			manager.ackInFlight("msg1");
 
 			// verify no in-flight drop on disconnect
@@ -377,7 +368,7 @@ describe("WebSocketManager", () => {
 	});
 
 	describe("onMessage", () => {
-		it("passes parsed JSON to onMessage callback", () => {
+		it("passes deserialized message to onMessage callback", () => {
 			const { manager, transport, rawMessages } = createManager();
 			manager.connect();
 			transport.simulateOpen();
@@ -391,11 +382,7 @@ describe("WebSocketManager", () => {
 
 		it("ignores pong messages when isPong is defined", () => {
 			const { manager, transport, rawMessages } = createManager({
-				isPong: (p) =>
-					typeof p === "object" &&
-					p !== null &&
-					"action" in p &&
-					(p as { action: unknown }).action === "pong",
+				isPong: (msg) => msg.action === "pong",
 			});
 			manager.connect();
 			transport.simulateOpen();
@@ -452,7 +439,7 @@ describe("WebSocketManager", () => {
 			manager.connect();
 			transport.simulateOpen();
 
-			manager.send("msg1", JSON.stringify({ text: "hello" }));
+			manager.send("msg1", { text: "hello" });
 			transport.simulateClose(1006);
 
 			expect(droppedInFlightIds).toHaveLength(1);
@@ -472,7 +459,7 @@ describe("WebSocketManager", () => {
 			manager.connect();
 			transport.simulateOpen();
 
-			manager.send("msg1", JSON.stringify({ text: "hello" }));
+			manager.send("msg1", { text: "hello" });
 			manager.ackInFlight("msg1");
 
 			transport.simulateClose(1006);
@@ -484,7 +471,7 @@ describe("WebSocketManager", () => {
 			manager.connect();
 			transport.simulateOpen();
 
-			manager.send(null, JSON.stringify({ text: "hello" }));
+			manager.send(null, { text: "hello" });
 			transport.simulateClose(1006);
 			expect(droppedInFlightIds).toHaveLength(0);
 		});
@@ -517,7 +504,8 @@ describe("WebSocketManager", () => {
 	describe("addProtocols", () => {
 		it("passes protocols when set before connect", () => {
 			const transport = new MockTransport();
-			const manager = new WebSocketManager({
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
 				url: "ws://test",
 				transport,
 			});
@@ -531,7 +519,8 @@ describe("WebSocketManager", () => {
 
 		it("omits protocols when none added", () => {
 			const transport = new MockTransport();
-			const manager = new WebSocketManager({
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
 				url: "ws://test",
 				transport,
 			});
@@ -541,7 +530,8 @@ describe("WebSocketManager", () => {
 
 		it("appends protocols across multiple calls", () => {
 			const transport = new MockTransport();
-			const manager = new WebSocketManager({
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
 				url: "ws://test",
 				transport,
 			});
@@ -617,6 +607,114 @@ describe("WebSocketManager", () => {
 			manager.unsubscribe("conversation:ch1");
 
 			expect(lastUnsubKeys).toHaveLength(0);
+		});
+	});
+
+	describe("online/offline handlers", () => {
+		it("offline sets reconnecting when connected", () => {
+			const { manager, transport, states } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+
+			window.dispatchEvent(new Event("offline"));
+
+			expect(states[states.length - 1]).toBe("reconnecting");
+		});
+
+		it("online triggers reconnect when disconnected from offline", () => {
+			const { manager, transport } = createManager({
+				reconnectMaxAttempts: 1,
+				reconnectBaseDelayMs: 10,
+			});
+			manager.connect();
+			transport.simulateOpen();
+
+			window.dispatchEvent(new Event("offline"));
+			// Simulate the socket close that the browser triggers on network loss
+			transport.simulateClose(1006);
+
+			// handleClose → scheduleReconnect (attempt 0→1), after timer fires it
+			// will try to reconnect. Advance to trigger that attempt, then fail it
+			// so we exhaust max attempts and land on "disconnected".
+			vi.advanceTimersByTime(10_000);
+			// The reconnect attempt fires; simulate another failure
+			transport.simulateClose(1006);
+			// Now attempt(1) >= maxAttempts(1) → "disconnected"
+			expect(manager.getConnectionState()).toBe("disconnected");
+
+			const callsBefore = transport.connectCalls.length;
+
+			// handleOnline resets reconnectAttempt to 0 and calls scheduleReconnect
+			window.dispatchEvent(new Event("online"));
+			vi.advanceTimersByTime(10_000);
+
+			expect(transport.connectCalls.length).toBeGreaterThan(callsBefore);
+		});
+
+		it("online does not reconnect after intentional disconnect", () => {
+			const { manager, transport } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+
+			manager.disconnect();
+			const callsBefore = transport.connectCalls.length;
+
+			window.dispatchEvent(new Event("online"));
+			vi.advanceTimersByTime(200);
+
+			expect(transport.connectCalls.length).toBe(callsBefore);
+		});
+	});
+
+	describe("edge cases", () => {
+		it("subscribe without data does not send", () => {
+			const { manager, transport } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+			transport.sentMessages = [];
+
+			manager.subscribe("key");
+
+			expect(transport.sentMessages).toHaveLength(0);
+		});
+
+		it("unsubscribe when not subscribed is no-op", () => {
+			const { manager } = createManager();
+
+			manager.unsubscribe("nonexistent", unsubMsg("conversation", "x"));
+
+			expect(manager.getRefCount("nonexistent")).toBe(0);
+		});
+
+		it("connect after dispose resets disposed flag", () => {
+			const { manager, transport, states } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+
+			manager.dispose();
+
+			manager.connect();
+			transport.simulateOpen();
+
+			expect(states[states.length - 1]).toBe("connected");
+		});
+
+		it("connect is idempotent when already connecting", () => {
+			const { manager, transport } = createManager();
+			manager.connect();
+			manager.connect();
+
+			expect(transport.connectCalls).toHaveLength(1);
+		});
+
+		it("connect is idempotent when already connected", () => {
+			const { manager, transport } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+
+			manager.connect();
+
+			expect(transport.connectCalls).toHaveLength(1);
 		});
 	});
 });

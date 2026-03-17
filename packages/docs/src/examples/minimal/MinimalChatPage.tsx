@@ -1,9 +1,5 @@
 import type { TConnectionState } from "@luciodale/react-socket";
-import {
-	useSend,
-	useSubscription,
-	WebSocketManager,
-} from "@luciodale/react-socket";
+import { WebSocketManager } from "@luciodale/react-socket";
 import { useCallback, useEffect, useState } from "react";
 import { create } from "zustand";
 
@@ -11,8 +7,22 @@ import { create } from "zustand";
 
 type TMessage = { id: string; sender: string; text: string };
 
+type TClientMsg =
+	| { action: "ping" }
+	| { action: "subscribe"; type: string; channel: string }
+	| { action: "unsubscribe"; type: string; channel: string }
+	| {
+			action: "message";
+			type: "conversation";
+			id: string;
+			channel: string;
+			text: string;
+	  };
+
 type TServerMsg =
+	| { action: "pong" }
 	| { action: "subscribe_ack"; type: string; channel: string }
+	| { action: "unsubscribe_ack"; type: string; channel: string }
 	| {
 			action: "message";
 			type: "conversation";
@@ -36,25 +46,25 @@ const useStore = create<TStore>()(() => ({
 
 // ── Manager ──────────────────────────────────────────────────────────
 
-const manager = new WebSocketManager({
+const manager = new WebSocketManager<TClientMsg, TServerMsg>({
 	url: "ws://localhost:3001/ws",
+	serialize: (msg) => JSON.stringify(msg),
+	deserialize: (raw) => JSON.parse(raw) as TServerMsg,
 
-	serializePing: () => JSON.stringify({ action: "ping" }),
-	isPong: (p) =>
-		typeof p === "object" &&
-		p !== null &&
-		"action" in p &&
-		(p as { action: unknown }).action === "pong",
+	ping: { action: "ping" },
+	isPong: (msg) => msg.action === "pong",
 
 	onConnectionStateChange(state) {
 		useStore.setState({ connectionState: state });
 	},
 
-	onMessage(parsed) {
-		const msg = parsed as TServerMsg;
-
+	onMessage(msg) {
 		if (msg.action === "subscribe_ack") {
 			manager.resolvePendingSubscription(`${msg.type}:${msg.channel}`);
+			return;
+		}
+
+		if (msg.action === "unsubscribe_ack") {
 			return;
 		}
 
@@ -77,23 +87,19 @@ const manager = new WebSocketManager({
 
 function useChat(channel: string) {
 	const messages = useStore((s) => s.messages[channel] ?? EMPTY);
-	const send = useSend(manager);
 
 	const sendMessage = useCallback(
 		(text: string) => {
 			const id = crypto.randomUUID();
-			send(
+			manager.send(id, {
+				action: "message",
+				type: "conversation",
 				id,
-				JSON.stringify({
-					action: "message",
-					type: "conversation",
-					id,
-					channel,
-					text,
-				}),
-			);
+				channel,
+				text,
+			});
 		},
-		[send, channel],
+		[channel],
 	);
 
 	return { messages, sendMessage };
@@ -108,15 +114,20 @@ function ChatRoom({ channel }: { channel: string }) {
 	const connectionState = useStore((s) => s.connectionState);
 	const { messages, sendMessage } = useChat(channel);
 
-	useSubscription(
-		manager,
-		`conversation:${channel}`,
-		JSON.stringify({
+	useEffect(() => {
+		manager.subscribe(`conversation:${channel}`, {
 			action: "subscribe",
 			type: "conversation",
 			channel,
-		}),
-	);
+		});
+		return () => {
+			manager.unsubscribe(`conversation:${channel}`, {
+				action: "unsubscribe",
+				type: "conversation",
+				channel,
+			});
+		};
+	}, [channel]);
 
 	function handleSend() {
 		if (!input.trim()) return;

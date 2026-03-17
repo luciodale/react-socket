@@ -1,4 +1,4 @@
-import { MinimalChatPage } from "./examples/minimal/MinimalChatPage";
+import { MinimalChatPage } from "./examples/minimal-react-query/MinimalChatPage";
 
 export function App() {
 	return (

@@ -1,4 +1,3 @@
-import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import dts from "vite-plugin-dts";
@@ -21,13 +20,15 @@ export default defineConfig({
 		outDir: "packages/library/dist",
 		emptyOutDir: true,
 		lib: {
-			name: "LucioDaleReactSocket",
-			entry: resolve(__dirname, "packages/library/src/index.ts"),
-			formats: ["es", "umd"],
-			fileName: (format) => `react-socket.${format}.js`,
+			entry: {
+				"react-socket": "packages/library/src/index.ts",
+				"react-socket-inspector": "packages/library/src/inspector/index.ts",
+			},
+			formats: ["es"],
+			fileName: (_format, entryName) => `${entryName}.es.js`,
 		},
 		rollupOptions: {
-			external: ["react", "react-dom"],
+			external: ["react", "react-dom", "react/jsx-runtime"],
 			output: {
 				globals: {
 					react: "React",

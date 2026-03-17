@@ -9,32 +9,52 @@ import { createTransport } from "./transport";
 import type {
 	IWebSocketTransport,
 	TConnectionState,
+	TDebugEvent,
+	TDebugEventPayload,
 	TManagerConfig,
 } from "./types";
 
-export class WebSocketManager {
+export class WebSocketManager<TClientMsg, TServerMsg> {
 	private readonly url: string;
 	private readonly transport: IWebSocketTransport;
+	private readonly serialize: (msg: TClientMsg) => string;
+	private readonly deserialize: (raw: string) => TServerMsg;
 	private readonly pingIntervalMs: number;
 	private readonly pongTimeoutMs: number;
 	private readonly reconnectMaxAttempts: number;
 	private readonly reconnectBaseDelayMs: number;
 	private readonly reconnectMaxDelayMs: number;
 
-	private readonly serializePing: (() => string) | undefined;
-	private readonly isPong: ((parsed: unknown) => boolean) | undefined;
+	private readonly ping: TClientMsg | undefined;
+	private readonly isPong: ((msg: TServerMsg) => boolean) | undefined;
 
-	private readonly onMessageCb: TManagerConfig["onMessage"];
-	private readonly onConnectionStateChange: TManagerConfig["onConnectionStateChange"];
-	private readonly onReady: TManagerConfig["onReady"];
-	private readonly onInFlightDrop: TManagerConfig["onInFlightDrop"];
-	private readonly onLastUnsubscribe: TManagerConfig["onLastUnsubscribe"];
+	private readonly onMessageCb: TManagerConfig<
+		TClientMsg,
+		TServerMsg
+	>["onMessage"];
+	private readonly onConnectionStateChange: TManagerConfig<
+		TClientMsg,
+		TServerMsg
+	>["onConnectionStateChange"];
+	private readonly onReady: TManagerConfig<TClientMsg, TServerMsg>["onReady"];
+	private readonly onInFlightDrop: TManagerConfig<
+		TClientMsg,
+		TServerMsg
+	>["onInFlightDrop"];
+	private readonly onLastUnsubscribe: TManagerConfig<
+		TClientMsg,
+		TServerMsg
+	>["onLastUnsubscribe"];
+	private readonly onDebugCb: TManagerConfig<TClientMsg, TServerMsg>["onDebug"];
 
 	private readonly subscriptionRefCounts = new Map<string, number>();
-	private readonly subscriptionData = new Map<string, string | undefined>();
+	private readonly subscriptionData = new Map<string, TClientMsg | undefined>();
 	private readonly pendingSubscriptions = new Set<string>();
-	private readonly inFlightMessages = new Map<string, string>();
+	private readonly inFlightMessages = new Map<string, TClientMsg>();
 	private readonly connectionStateListeners = new Set<() => void>();
+	private readonly debugListeners = new Set<
+		(event: TDebugEvent<TClientMsg, TServerMsg>) => void
+	>();
 
 	private protocols: string[] = [];
 	private connectionState: TConnectionState = "disconnected";
@@ -44,9 +64,12 @@ export class WebSocketManager {
 	private pongTimer: ReturnType<typeof setTimeout> | null = null;
 	private intentionalClose = false;
 	private disposed = false;
+	private debugEventCounter = 0;
 
-	constructor(config: TManagerConfig) {
+	constructor(config: TManagerConfig<TClientMsg, TServerMsg>) {
 		this.url = config.url;
+		this.serialize = config.serialize;
+		this.deserialize = config.deserialize;
 		this.transport = config.transport ?? createTransport();
 		this.pingIntervalMs = config.pingIntervalMs ?? PING_INTERVAL_MS;
 		this.pongTimeoutMs = config.pongTimeoutMs ?? PONG_TIMEOUT_MS;
@@ -56,13 +79,14 @@ export class WebSocketManager {
 			config.reconnectBaseDelayMs ?? RECONNECT_BASE_DELAY_MS;
 		this.reconnectMaxDelayMs =
 			config.reconnectMaxDelayMs ?? RECONNECT_MAX_DELAY_MS;
-		this.serializePing = config.serializePing;
+		this.ping = config.ping;
 		this.isPong = config.isPong;
 		this.onMessageCb = config.onMessage;
 		this.onConnectionStateChange = config.onConnectionStateChange;
 		this.onReady = config.onReady;
 		this.onInFlightDrop = config.onInFlightDrop;
 		this.onLastUnsubscribe = config.onLastUnsubscribe;
+		this.onDebugCb = config.onDebug;
 
 		this.handleOnline = this.handleOnline.bind(this);
 		this.handleOffline = this.handleOffline.bind(this);
@@ -112,11 +136,12 @@ export class WebSocketManager {
 		this.subscriptionData.clear();
 		this.pendingSubscriptions.clear();
 		this.inFlightMessages.clear();
+		this.emitDebug({ type: "dispose" });
 	}
 
 	// ── Subscriptions ─────────────────────────────────────────────────
 
-	subscribe(key: string, data?: string): void {
+	subscribe(key: string, data?: TClientMsg): void {
 		const current = this.subscriptionRefCounts.get(key) ?? 0;
 		this.subscriptionRefCounts.set(key, current + 1);
 		this.subscriptionData.set(key, data);
@@ -124,9 +149,18 @@ export class WebSocketManager {
 		if (current === 0 && !this.pendingSubscriptions.has(key)) {
 			this.sendSubscribe(key);
 		}
+
+		this.emitDebug({
+			type: "subscribe",
+			key,
+			refCount: current + 1,
+			...(data !== undefined
+				? { raw: this.serialize(data), deserialized: data }
+				: {}),
+		});
 	}
 
-	unsubscribe(key: string, data?: string): void {
+	unsubscribe(key: string, data?: TClientMsg): void {
 		const current = this.subscriptionRefCounts.get(key) ?? 0;
 		if (current <= 0) return;
 
@@ -136,12 +170,21 @@ export class WebSocketManager {
 			this.subscriptionData.delete(key);
 			this.pendingSubscriptions.delete(key);
 			if (data && this.connectionState === "connected") {
-				this.rawSend(data);
+				this.rawSend(this.serialize(data));
 			}
 			this.onLastUnsubscribe?.(key);
 		} else {
 			this.subscriptionRefCounts.set(key, next);
 		}
+
+		this.emitDebug({
+			type: "unsubscribe",
+			key,
+			refCount: next,
+			...(data !== undefined
+				? { raw: this.serialize(data), deserialized: data }
+				: {}),
+		});
 	}
 
 	getRefCount(key: string): number {
@@ -156,19 +199,30 @@ export class WebSocketManager {
 
 	ackInFlight(id: string): void {
 		this.inFlightMessages.delete(id);
+		this.emitDebug({ type: "in-flight-ack", messageId: id });
 	}
 
 	resolvePendingSubscription(key: string): void {
 		this.pendingSubscriptions.delete(key);
+		this.emitDebug({ type: "pending-subscription-resolved", key });
 	}
 
 	// ── Sending ───────────────────────────────────────────────────────
 
-	send(id: string | null, data: string): boolean {
+	send(id: string | null, msg: TClientMsg): boolean {
 		if (this.connectionState !== "connected") return false;
-		const sent = this.rawSend(data);
+		const serialized = this.serialize(msg);
+		const sent = this.rawSend(serialized);
 		if (sent && id) {
-			this.inFlightMessages.set(id, data);
+			this.inFlightMessages.set(id, msg);
+		}
+		if (sent) {
+			this.emitDebug({
+				type: "message-sent",
+				messageId: id,
+				raw: serialized,
+				deserialized: msg,
+			});
 		}
 		return sent;
 	}
@@ -186,14 +240,56 @@ export class WebSocketManager {
 		};
 	}
 
+	// ── Debug ─────────────────────────────────────────────────────────
+
+	addDebugListener(
+		cb: (event: TDebugEvent<TClientMsg, TServerMsg>) => void,
+	): () => void {
+		this.debugListeners.add(cb);
+		return () => {
+			this.debugListeners.delete(cb);
+		};
+	}
+
+	// ── Read-only getters ─────────────────────────────────────────────
+
+	getSubscriptionRefCounts(): ReadonlyMap<string, number> {
+		return this.subscriptionRefCounts;
+	}
+
+	getSubscriptionData(): ReadonlyMap<string, TClientMsg | undefined> {
+		return this.subscriptionData;
+	}
+
+	getInFlightMessages(): ReadonlyMap<string, TClientMsg> {
+		return this.inFlightMessages;
+	}
+
+	getReconnectAttempt(): number {
+		return this.reconnectAttempt;
+	}
+
+	getProtocols(): readonly string[] {
+		return this.protocols;
+	}
+
+	isDisposed(): boolean {
+		return this.disposed;
+	}
+
+	isIntentionalClose(): boolean {
+		return this.intentionalClose;
+	}
+
 	// ── Private: handlers ─────────────────────────────────────────────
 
 	private handleOpen(): void {
 		this.reconnectAttempt = 0;
 		this.setConnectionState("connected");
 		this.startPingInterval();
-		this.restoreSubscriptions();
+		const restoredKeys = this.restoreSubscriptions();
 		this.onReady?.();
+		this.emitDebug({ type: "ready", restoredKeys });
 	}
 
 	private handleClose(event: CloseEvent): void {
@@ -201,8 +297,10 @@ export class WebSocketManager {
 		this.pendingSubscriptions.clear();
 
 		if (this.inFlightMessages.size > 0) {
-			this.onInFlightDrop?.(Array.from(this.inFlightMessages.keys()));
+			const ids = Array.from(this.inFlightMessages.keys());
+			this.onInFlightDrop?.(ids);
 			this.inFlightMessages.clear();
+			this.emitDebug({ type: "in-flight-drop", ids });
 		}
 
 		if (this.intentionalClose || this.disposed) {
@@ -219,18 +317,32 @@ export class WebSocketManager {
 	}
 
 	private handleMessage(event: MessageEvent): void {
-		let parsed: unknown;
+		const raw = event.data as string;
+		let parsed: TServerMsg;
 		try {
-			parsed = JSON.parse(event.data as string);
-		} catch {
+			parsed = this.deserialize(raw);
+		} catch (error) {
+			this.emitDebug({ type: "deserialize-error", raw, error });
 			return;
 		}
 
 		if (this.isPong?.(parsed)) {
 			this.clearPongTimeout();
+			this.emitDebug({
+				type: "message-received",
+				raw,
+				deserialized: parsed,
+				isPong: true,
+			});
 			return;
 		}
 
+		this.emitDebug({
+			type: "message-received",
+			raw,
+			deserialized: parsed,
+			isPong: false,
+		});
 		this.onMessageCb?.(parsed);
 	}
 
@@ -265,6 +377,11 @@ export class WebSocketManager {
 			this.reconnectMaxDelayMs,
 		);
 		this.reconnectAttempt++;
+		this.emitDebug({
+			type: "reconnect-scheduled",
+			attempt: this.reconnectAttempt,
+			delayMs: delay,
+		});
 
 		this.reconnectTimer = setTimeout(() => {
 			this.reconnectTimer = null;
@@ -279,20 +396,32 @@ export class WebSocketManager {
 		}, delay);
 	}
 
-	private restoreSubscriptions(): void {
+	private restoreSubscriptions(): string[] {
+		const restoredKeys: string[] = [];
 		for (const key of this.subscriptionData.keys()) {
 			this.sendSubscribe(key);
+			restoredKeys.push(key);
 		}
+		return restoredKeys;
 	}
 
 	// ── Private: ping / pong ──────────────────────────────────────────
 
 	private startPingInterval(): void {
 		this.clearTimers();
-		if (!this.serializePing) return;
+		if (!this.ping) return;
 
 		this.pingTimer = setInterval(() => {
-			this.rawSend(this.serializePing?.() ?? "");
+			if (this.ping) {
+				const raw = this.serialize(this.ping);
+				this.rawSend(raw);
+				this.emitDebug({
+					type: "message-sent",
+					messageId: null,
+					raw,
+					deserialized: this.ping,
+				});
+			}
 			this.pongTimer = setTimeout(() => {
 				this.transport.disconnect(4000, "pong timeout");
 			}, this.pongTimeoutMs);
@@ -322,16 +451,31 @@ export class WebSocketManager {
 		const data = this.subscriptionData.get(key);
 		this.pendingSubscriptions.add(key);
 		if (data) {
-			this.rawSend(data);
+			this.rawSend(this.serialize(data));
 		}
 	}
 
 	private setConnectionState(state: TConnectionState): void {
 		if (this.connectionState === state) return;
+		const from = this.connectionState;
 		this.connectionState = state;
 		this.onConnectionStateChange?.(state);
 		for (const listener of this.connectionStateListeners) {
 			listener();
+		}
+		this.emitDebug({ type: "connection-state-change", from, to: state });
+	}
+
+	private emitDebug(payload: TDebugEventPayload<TClientMsg, TServerMsg>): void {
+		if (this.debugListeners.size === 0 && !this.onDebugCb) return;
+		const event = {
+			...payload,
+			id: ++this.debugEventCounter,
+			timestamp: Date.now(),
+		} as TDebugEvent<TClientMsg, TServerMsg>;
+		this.onDebugCb?.(event);
+		for (const listener of this.debugListeners) {
+			listener(event);
 		}
 	}
 

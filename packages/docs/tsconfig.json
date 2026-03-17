@@ -22,7 +22,8 @@
 		/* Path mapping */
 		"baseUrl": ".",
 		"paths": {
-			"@luciodale/react-socket": ["../library/src"]
+			"@luciodale/react-socket": ["../library/src"],
+			"@luciodale/react-socket/inspector": ["../library/src/inspector"]
 		}
 	},
 	"include": ["src"]

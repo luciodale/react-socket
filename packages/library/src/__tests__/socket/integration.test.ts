@@ -19,6 +19,8 @@ type TTestState = {
 	messages: Record<string, TMessage[]>;
 };
 
+type TClientMsg = Record<string, unknown>;
+
 type TServerMsg =
 	| { action: "subscribe_ack"; type: string; channel: string }
 	| {
@@ -56,8 +58,8 @@ function createTestStore() {
 	return { useStore };
 }
 
-function serializeSub(type: string, channel: string): string {
-	return JSON.stringify({ action: "subscribe", type, channel });
+function subMsg(type: string, channel: string): TClientMsg {
+	return { action: "subscribe", type, channel };
 }
 
 function createTestSystem(
@@ -66,17 +68,17 @@ function createTestSystem(
 ) {
 	const connectionStates: string[] = [];
 
-	const manager = new WebSocketManager({
+	const manager = new WebSocketManager<TClientMsg, TServerMsg>({
 		url: "ws://test",
 		transport,
+		serialize: (msg) => JSON.stringify(msg),
+		deserialize: (raw) => JSON.parse(raw) as TServerMsg,
 		pingIntervalMs: 60_000,
 		pongTimeoutMs: 5_000,
 		reconnectBaseDelayMs: 10,
 		reconnectMaxAttempts: 3,
 		reconnectMaxDelayMs: 100,
-		onMessage(parsed) {
-			const msg = parsed as TServerMsg;
-
+		onMessage(msg) {
 			// resolve subscription acks
 			if (msg.action === "subscribe_ack" && "type" in msg && "channel" in msg) {
 				manager.resolvePendingSubscription(`${msg.type}:${msg.channel}`);
@@ -223,11 +225,11 @@ describe("integration: manager + zustand store", () => {
 		expect(connectionStates).toContain("connected");
 
 		// 2. Subscribe
-		manager.subscribe("conversation:ch1", serializeSub("conversation", "ch1"));
-		const subMsg = transport.sentMessages.find((m) =>
+		manager.subscribe("conversation:ch1", subMsg("conversation", "ch1"));
+		const sentSub = transport.sentMessages.find((m) =>
 			m.includes('"subscribe"'),
 		);
-		expect(subMsg).toBeDefined();
+		expect(sentSub).toBeDefined();
 
 		// 3. Receive dump
 		transport.simulateMessage(
@@ -249,13 +251,13 @@ describe("integration: manager + zustand store", () => {
 		expect(useStore.getState().messages.ch1[0].id).toBe("hist1");
 
 		// 4. Send a message
-		const data = JSON.stringify({
+		const data = {
 			action: "message",
 			type: "conversation",
 			id: "msg1",
 			channel: "ch1",
 			message: "hello",
-		});
+		};
 		manager.send("msg1", data);
 		const sent = transport.sentMessages.find((m) => m.includes('"msg1"'));
 		expect(sent).toBeDefined();
@@ -301,7 +303,7 @@ describe("integration: manager + zustand store", () => {
 
 		manager.connect();
 		transport.simulateOpen();
-		manager.subscribe("conversation:ch1", serializeSub("conversation", "ch1"));
+		manager.subscribe("conversation:ch1", subMsg("conversation", "ch1"));
 
 		// optimistic insert
 		useStore.setState((s) => ({
@@ -318,16 +320,13 @@ describe("integration: manager + zustand store", () => {
 			},
 		}));
 
-		manager.send(
-			"msg1",
-			JSON.stringify({
-				action: "message",
-				type: "conversation",
-				id: "msg1",
-				channel: "ch1",
-				message: "hello",
-			}),
-		);
+		manager.send("msg1", {
+			action: "message",
+			type: "conversation",
+			id: "msg1",
+			channel: "ch1",
+			message: "hello",
+		});
 
 		// disconnect drops in-flight
 		transport.simulateClose(1006);
@@ -352,7 +351,7 @@ describe("integration: manager + zustand store", () => {
 
 		manager.connect();
 		transport.simulateOpen();
-		manager.subscribe("conversation:ch1", serializeSub("conversation", "ch1"));
+		manager.subscribe("conversation:ch1", subMsg("conversation", "ch1"));
 
 		// optimistic insert
 		useStore.setState(() => ({
@@ -368,16 +367,13 @@ describe("integration: manager + zustand store", () => {
 			},
 		}));
 
-		manager.send(
-			"fail-msg",
-			JSON.stringify({
-				action: "message",
-				type: "conversation",
-				id: "fail-msg",
-				channel: "ch1",
-				message: "403",
-			}),
-		);
+		manager.send("fail-msg", {
+			action: "message",
+			type: "conversation",
+			id: "fail-msg",
+			channel: "ch1",
+			message: "403",
+		});
 
 		// server rejects
 		transport.simulateMessage(
@@ -404,7 +400,7 @@ describe("integration: manager + zustand store", () => {
 
 		manager.connect();
 		transport.simulateOpen();
-		manager.subscribe("conversation:ch1", serializeSub("conversation", "ch1"));
+		manager.subscribe("conversation:ch1", subMsg("conversation", "ch1"));
 
 		// start with undelivered message
 		useStore.setState(() => ({
@@ -429,16 +425,13 @@ describe("integration: manager + zustand store", () => {
 			return { messages: { ...s.messages, ch1: updated } };
 		});
 
-		manager.send(
-			"msg-1",
-			JSON.stringify({
-				action: "message",
-				type: "conversation",
-				id: "msg-1",
-				channel: "ch1",
-				message: "hello",
-			}),
-		);
+		manager.send("msg-1", {
+			action: "message",
+			type: "conversation",
+			id: "msg-1",
+			channel: "ch1",
+			message: "hello",
+		});
 
 		// server echoes
 		transport.simulateMessage(
@@ -467,8 +460,8 @@ describe("integration: manager + zustand store", () => {
 
 		manager.connect();
 		transport.simulateOpen();
-		manager.subscribe("conversation:ch1", serializeSub("conversation", "ch1"));
-		manager.subscribe("conversation:ch2", serializeSub("conversation", "ch2"));
+		manager.subscribe("conversation:ch1", subMsg("conversation", "ch1"));
+		manager.subscribe("conversation:ch2", subMsg("conversation", "ch2"));
 
 		transport.simulateMessage(
 			JSON.stringify({
@@ -536,7 +529,7 @@ describe("integration: manager + zustand store", () => {
 
 		manager.connect();
 		transport.simulateOpen();
-		manager.subscribe("conversation:ch1", serializeSub("conversation", "ch1"));
+		manager.subscribe("conversation:ch1", subMsg("conversation", "ch1"));
 
 		// first dump
 		transport.simulateMessage(
@@ -593,7 +586,7 @@ describe("integration: manager + zustand store", () => {
 
 		manager.connect();
 		transport.simulateOpen();
-		manager.subscribe("conversation:ch1", serializeSub("conversation", "ch1"));
+		manager.subscribe("conversation:ch1", subMsg("conversation", "ch1"));
 
 		expect(manager.getPendingSubscriptions().has("conversation:ch1")).toBe(
 			true,

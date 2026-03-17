@@ -15,6 +15,7 @@ type TClientMsg =
 type TServerMsg =
 	| { action: "pong" }
 	| { action: "subscribe_ack"; type: string; channel: string }
+	| { action: "unsubscribe_ack"; type: string; channel: string }
 	| {
 			action: "message";
 			type: "conversation";
@@ -44,8 +45,15 @@ function handleMessage(ws: { send: (data: string) => void }, msg: TClientMsg) {
 			break;
 		}
 
-		case "unsubscribe":
+		case "unsubscribe": {
+			const ack: TServerMsg = {
+				action: "unsubscribe_ack",
+				type: msg.type,
+				channel: msg.channel,
+			};
+			ws.send(JSON.stringify(ack));
 			break;
+		}
 
 		case "message": {
 			// Echo the user's message back

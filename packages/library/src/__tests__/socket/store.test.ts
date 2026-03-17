@@ -19,6 +19,8 @@ type TTestState = {
 	messages: Record<string, TMessage[]>;
 };
 
+type TClientMsg = Record<string, unknown>;
+
 type TServerMsg =
 	| { action: "subscribe_ack"; type: string; channel: string }
 	| {
@@ -160,16 +162,17 @@ function createConnectedManager(
 ) {
 	const transport = new MockTransport();
 
-	const manager = new WebSocketManager({
+	const manager = new WebSocketManager<TClientMsg, TServerMsg>({
 		url: "ws://test",
 		transport,
+		serialize: (msg) => JSON.stringify(msg),
+		deserialize: (raw) => JSON.parse(raw) as TServerMsg,
 		pingIntervalMs: 60_000,
 		pongTimeoutMs: 5_000,
 		reconnectBaseDelayMs: 10,
 		reconnectMaxAttempts: 3,
 		reconnectMaxDelayMs: 100,
-		onMessage(parsed) {
-			const msg = parsed as TServerMsg;
+		onMessage(msg) {
 			onMessage(msg, useStore);
 		},
 		onInFlightDrop(ids) {
@@ -452,16 +455,13 @@ describe("onInFlightDrop callback", () => {
 		const { manager, transport } = createConnectedManager(useStore);
 		manager.subscribe("conversation:ch1");
 
-		manager.send(
-			"msg1",
-			JSON.stringify({
-				action: "message",
-				type: "conversation",
-				id: "msg1",
-				channel: "ch1",
-				message: "hello",
-			}),
-		);
+		manager.send("msg1", {
+			action: "message",
+			type: "conversation",
+			id: "msg1",
+			channel: "ch1",
+			message: "hello",
+		});
 
 		transport.simulateClose(1006);
 

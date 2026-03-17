@@ -6,17 +6,20 @@
 		"type": "git",
 		"url": "https://github.com/luciodale/react-socket"
 	},
-	"main": "dist/react-socket.umd.js",
 	"module": "dist/react-socket.es.js",
 	"exports": {
 		".": {
 			"types": "./dist/index.d.ts",
-			"import": "./dist/react-socket.es.js",
-			"require": "./dist/react-socket.umd.js"
+			"import": "./dist/react-socket.es.js"
+		},
+		"./inspector": {
+			"types": "./dist/inspector/index.d.ts",
+			"import": "./dist/react-socket-inspector.es.js"
 		}
 	},
 	"peerDependencies": {
-		"react": ">=16 || >=17 || >=18 || >=19"
+		"react": ">=16 || >=17 || >=18 || >=19",
+		"react-dom": ">=16 || >=17 || >=18 || >=19"
 	},
 	"description": "Lightweight WebSocket manager for React with reconnection, subscriptions, and in-flight tracking.",
 	"files": [

@@ -15,6 +15,10 @@ export default defineConfig({
 	},
 	resolve: {
 		alias: {
+			"@luciodale/react-socket/inspector": resolve(
+				__dirname,
+				"../library/src/inspector",
+			),
 			"@luciodale/react-socket": resolve(__dirname, "../library/src"),
 		},
 	},
