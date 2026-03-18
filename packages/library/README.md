@@ -56,7 +56,7 @@ const manager = new WebSocketManager<ClientMsg, ServerMsg>({
 
   // Callbacks
   onMessageReceived: (msg) => {},                // server → client
-  onSendIntent: (id, msg, meta?) => {},          // fires on every send() — for optimistic updates
+  onSendIntent: ({ data, ackId, meta }) => {},    // fires on every send() — for optimistic updates
   onConnectionStateChange: (state) => {},
   onReady: () => {},                             // fires after connect + subscription restore
   onInFlightDrop: (messages) => {},              // { id, data }[] — unacked messages lost on disconnect
@@ -97,19 +97,29 @@ On reconnection, all active subscriptions are automatically re-sent to the serve
 
 ```tsx
 // Fire-and-forget
-manager.send(null, { action: "typing", channel: "room1" });
+manager.send({ data: { action: "typing", channel: "room1" } });
 
-// With in-flight tracking (pass a unique ID)
-manager.send("msg-123", { action: "chat", text: "hello" });
+// With in-flight tracking
+manager.send({ data: { action: "chat", text: "hello" }, ackId: "msg-123" });
 
-// With meta — passed through to onSendIntent for optimistic updates
-manager.send("msg-123", { action: "chat", text: "hello" }, { sentAt: Date.now() });
+// With meta — passed through to onSendIntent, never sent on the wire
+manager.send({
+  data: { action: "chat", text: "hello" },
+  ackId: "msg-123",
+  meta: { sentAt: Date.now() },
+});
 
 // Acknowledge delivery (removes from in-flight map)
 manager.ackInFlight("msg-123");
 ```
 
-If the connection drops while messages are in-flight, `onInFlightDrop` fires with an array of `{ id, data }` objects containing both the message ID and the original message data.
+| Field | Purpose |
+|-------|---------|
+| `data` | The message — serialized and sent on the wire |
+| `ackId` | Optional. Tracks the message as in-flight until `ackInFlight(ackId)` is called |
+| `meta` | Optional. Passed to `onSendIntent` for optimistic updates. Never serialized |
+
+If the connection drops while messages are in-flight, `onInFlightDrop` fires with an array of `{ id, data }` objects containing both the ack ID and the original message data.
 
 ### Optimistic updates with `onSendIntent`
 
@@ -118,24 +128,20 @@ If the connection drops while messages are in-flight, `onInFlightDrop` fires wit
 ```tsx
 const manager = new WebSocketManager({
   // ...
-  onSendIntent(id, msg, meta) {
-    if (msg.action !== "message" || !id) return;
-    // Add to UI immediately — no need to wait for server echo
-    store.addMessage({ id, sender: "you", text: msg.text });
+  onSendIntent({ data, ackId, meta }) {
+    if (data.action !== "message" || !ackId) return;
+    store.addMessage({ id: ackId, sender: "you", text: data.text });
   },
   onMessageReceived(msg) {
     if (msg.action !== "message") return;
     manager.ackInFlight(msg.id);
-    // Skip messages we already added optimistically (same id)
     store.addMessageIfNew(msg);
   },
 });
 
 // Call site is just one line — all state logic lives in the callbacks
-manager.send(id, { action: "message", id, channel, text });
+manager.send({ data: { action: "message", id, channel, text }, ackId: id });
 ```
-
-The optional third argument (`meta`) passes through to `onSendIntent` for data that isn't part of the wire message but is needed for the UI update.
 
 ### Pending subscriptions
 

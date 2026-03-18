@@ -12,6 +12,7 @@ import type {
 	TDebugEvent,
 	TDebugEventPayload,
 	TManagerConfig,
+	TSendParams,
 } from "./types";
 
 export class WebSocketManager<TClientMsg, TServerMsg> {
@@ -237,9 +238,9 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 
 	// ── In-flight ─────────────────────────────────────────────────────
 
-	ackInFlight(id: string): void {
-		this.inFlightMessages.delete(id);
-		this.emitDebug({ type: "in-flight-ack", messageId: id });
+	ackInFlight(ackId: string): void {
+		this.inFlightMessages.delete(ackId);
+		this.emitDebug({ type: "in-flight-ack", ackId });
 	}
 
 	resolvePendingSubscription(key: string): void {
@@ -249,24 +250,20 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 
 	// ── Sending ───────────────────────────────────────────────────────
 
-	send<TMeta = unknown>(
-		id: string | null,
-		msg: TClientMsg,
-		meta?: TMeta,
-	): boolean {
-		this.onSendIntentCb?.(id, msg, meta);
+	send(params: TSendParams<TClientMsg>): boolean {
+		this.onSendIntentCb?.(params);
 		if (this.connectionState !== "connected") return false;
-		const serialized = this.serialize(msg);
+		const serialized = this.serialize(params.data);
 		const sent = this.rawSend(serialized);
-		if (sent && id) {
-			this.inFlightMessages.set(id, msg);
+		if (sent && params.ackId) {
+			this.inFlightMessages.set(params.ackId, params.data);
 		}
 		if (sent) {
 			this.emitDebug({
 				type: "message-sent",
-				messageId: id,
+				ackId: params.ackId,
 				raw: serialized,
-				deserialized: msg,
+				deserialized: params.data,
 			});
 		}
 		return sent;
@@ -472,7 +469,7 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 				this.rawSend(raw);
 				this.emitDebug({
 					type: "message-sent",
-					messageId: null,
+					ackId: undefined,
 					raw,
 					deserialized: this.ping,
 				});

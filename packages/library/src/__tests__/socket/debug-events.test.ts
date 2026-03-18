@@ -224,36 +224,36 @@ describe("WebSocketManager debug events", () => {
 	});
 
 	describe("message-sent events", () => {
-		it("emits with messageId, raw, deserialized when send succeeds", () => {
+		it("emits with ackId, raw, deserialized when send succeeds", () => {
 			const { manager, transport, events } = createManager();
 			manager.connect();
 			transport.simulateOpen();
 
 			const msg = { text: "hello" };
-			manager.send("msg1", msg);
+			manager.send({ data: msg, ackId: "msg1" });
 
 			const sentEvents = eventsOfType(events, "message-sent");
 			expect(sentEvents).toHaveLength(1);
-			expect(sentEvents[0].messageId).toBe("msg1");
+			expect(sentEvents[0].ackId).toBe("msg1");
 			expect(sentEvents[0].raw).toBe(JSON.stringify(msg));
 			expect(sentEvents[0].deserialized).toEqual(msg);
 		});
 
-		it("emits with null messageId for fire-and-forget", () => {
+		it("emits with null ackId for fire-and-forget", () => {
 			const { manager, transport, events } = createManager();
 			manager.connect();
 			transport.simulateOpen();
 
-			manager.send(null, { text: "fire" });
+			manager.send({ data: { text: "fire" } });
 
 			const sentEvents = eventsOfType(events, "message-sent");
 			expect(sentEvents).toHaveLength(1);
-			expect(sentEvents[0].messageId).toBeNull();
+			expect(sentEvents[0].ackId).toBeUndefined();
 		});
 
 		it("does NOT emit when not connected", () => {
 			const { manager, events } = createManager();
-			manager.send("msg1", { text: "hi" });
+			manager.send({ data: { text: "hi" }, ackId: "msg1" });
 
 			const sentEvents = eventsOfType(events, "message-sent");
 			expect(sentEvents).toHaveLength(0);
@@ -343,12 +343,12 @@ describe("WebSocketManager debug events", () => {
 			manager.connect();
 			transport.simulateOpen();
 
-			manager.send("msg1", { text: "hello" });
+			manager.send({ data: { text: "hello" }, ackId: "msg1" });
 			manager.ackInFlight("msg1");
 
 			const ackEvents = eventsOfType(events, "in-flight-ack");
 			expect(ackEvents).toHaveLength(1);
-			expect(ackEvents[0].messageId).toBe("msg1");
+			expect(ackEvents[0].ackId).toBe("msg1");
 		});
 	});
 
@@ -358,8 +358,8 @@ describe("WebSocketManager debug events", () => {
 			manager.connect();
 			transport.simulateOpen();
 
-			manager.send("msg1", { text: "hello" });
-			manager.send("msg2", { text: "world" });
+			manager.send({ data: { text: "hello" }, ackId: "msg1" });
+			manager.send({ data: { text: "world" }, ackId: "msg2" });
 			transport.simulateClose(1006);
 
 			const dropEvents = eventsOfType(events, "in-flight-drop");
@@ -456,7 +456,7 @@ describe("WebSocketManager debug events", () => {
 			expect(sentEvents).toHaveLength(1);
 			expect(sentEvents[0].raw).toBe(JSON.stringify(pingMsg));
 			expect(sentEvents[0].deserialized).toEqual(pingMsg);
-			expect(sentEvents[0].messageId).toBeNull();
+			expect(sentEvents[0].ackId).toBeUndefined();
 		});
 	});
 
@@ -479,7 +479,7 @@ describe("WebSocketManager debug events", () => {
 			transport.simulateOpen();
 
 			manager.subscribe("conversation:ch1", subMsg("conversation", "ch1"));
-			manager.send("msg1", { text: "hello" });
+			manager.send({ data: { text: "hello" }, ackId: "msg1" });
 			manager.ackInFlight("msg1");
 			manager.unsubscribe("conversation:ch1", unsubMsg("conversation", "ch1"));
 			manager.disconnect();
@@ -517,7 +517,7 @@ describe("WebSocketManager debug events", () => {
 			manager.connect();
 			transport.simulateOpen();
 			manager.subscribe("conversation:ch1", subMsg("conversation", "ch1"));
-			manager.send("msg1", { text: "hello" });
+			manager.send({ data: { text: "hello" }, ackId: "msg1" });
 			manager.ackInFlight("msg1");
 			transport.simulateMessage(JSON.stringify({ type: "chat", text: "hi" }));
 			transport.simulateMessage("bad json{{{");

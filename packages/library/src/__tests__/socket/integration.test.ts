@@ -258,7 +258,7 @@ describe("integration: manager + zustand store", () => {
 			channel: "ch1",
 			message: "hello",
 		};
-		manager.send("msg1", data);
+		manager.send({ data, ackId: "msg1" });
 		const sent = transport.sentMessages.find((m) => m.includes('"msg1"'));
 		expect(sent).toBeDefined();
 
@@ -320,12 +320,15 @@ describe("integration: manager + zustand store", () => {
 			},
 		}));
 
-		manager.send("msg1", {
-			action: "message",
-			type: "conversation",
-			id: "msg1",
-			channel: "ch1",
-			message: "hello",
+		manager.send({
+			data: {
+				action: "message",
+				type: "conversation",
+				id: "msg1",
+				channel: "ch1",
+				message: "hello",
+			},
+			ackId: "msg1",
 		});
 
 		// disconnect drops in-flight
@@ -367,12 +370,15 @@ describe("integration: manager + zustand store", () => {
 			},
 		}));
 
-		manager.send("fail-msg", {
-			action: "message",
-			type: "conversation",
-			id: "fail-msg",
-			channel: "ch1",
-			message: "403",
+		manager.send({
+			data: {
+				action: "message",
+				type: "conversation",
+				id: "fail-msg",
+				channel: "ch1",
+				message: "403",
+			},
+			ackId: "fail-msg",
 		});
 
 		// server rejects
@@ -425,12 +431,15 @@ describe("integration: manager + zustand store", () => {
 			return { messages: { ...s.messages, ch1: updated } };
 		});
 
-		manager.send("msg-1", {
-			action: "message",
-			type: "conversation",
-			id: "msg-1",
-			channel: "ch1",
-			message: "hello",
+		manager.send({
+			data: {
+				action: "message",
+				type: "conversation",
+				id: "msg-1",
+				channel: "ch1",
+				message: "hello",
+			},
+			ackId: "msg-1",
 		});
 
 		// server echoes

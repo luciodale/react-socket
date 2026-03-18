@@ -55,24 +55,25 @@ export const manager = new WebSocketManager<TClientMsg, TServerMsg>({
 	ping: { action: "ping" },
 	isPong: (msg) => msg.action === "pong",
 
-	onSendIntent(id, msg) {
-		if (msg.action !== "unreliable_message" || !id) return;
+	onSendIntent({ data, ackId }) {
+		if (data.action !== "unreliable_message" || !ackId) return;
 		useStore.setState((s) => {
-			const exists = s.messages.some((m) => m.id === id);
+			const exists = s.messages.some((m) => m.id === ackId);
 			if (exists) {
-				// Retry — reset sentAt
 				return {
 					messages: s.messages.map((m) =>
-						m.id === id ? { ...m, sentAt: Date.now() } : m,
+						m.id === ackId ? { ...m, sentAt: Date.now() } : m,
 					),
 				};
 			}
-			// New message
 			return {
-				messages: [...s.messages, { id, text: msg.text, sentAt: Date.now() }],
+				messages: [
+					...s.messages,
+					{ id: ackId, text: data.text, sentAt: Date.now() },
+				],
 			};
 		});
-		sync.addMessage(CHANNEL, { id, text: msg.text });
+		sync.addMessage(CHANNEL, { id: ackId, text: data.text });
 	},
 
 	onMessageReceived(msg) {
@@ -124,14 +125,16 @@ function useChat() {
 
 	const send = useCallback((text: string) => {
 		const id = crypto.randomUUID();
-		manager.send(id, { action: "unreliable_message", id, text });
+		manager.send({
+			data: { action: "unreliable_message", id, text },
+			ackId: id,
+		});
 	}, []);
 
 	const retry = useCallback((msg: TDisplayMessage) => {
-		manager.send(msg.id, {
-			action: "unreliable_message",
-			id: msg.id,
-			text: msg.text,
+		manager.send({
+			data: { action: "unreliable_message", id: msg.id, text: msg.text },
+			ackId: msg.id,
 		});
 	}, []);
 

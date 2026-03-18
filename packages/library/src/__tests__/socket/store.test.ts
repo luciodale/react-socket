@@ -455,12 +455,15 @@ describe("onInFlightDrop callback", () => {
 		const { manager, transport } = createConnectedManager(useStore);
 		manager.subscribe("conversation:ch1");
 
-		manager.send("msg1", {
-			action: "message",
-			type: "conversation",
-			id: "msg1",
-			channel: "ch1",
-			message: "hello",
+		manager.send({
+			data: {
+				action: "message",
+				type: "conversation",
+				id: "msg1",
+				channel: "ch1",
+				message: "hello",
+			},
+			ackId: "msg1",
 		});
 
 		transport.simulateClose(1006);

@@ -47,15 +47,14 @@ export const manager = new WebSocketManager<TClientMsg, TServerMsg>({
 	ping: { action: "ping" },
 	isPong: (msg) => msg.action === "pong",
 
-	onSendIntent(id, msg) {
-		if (msg.action !== "message" || !id) return;
-		// Optimistic update — show the message immediately
+	onSendIntent({ data, ackId }) {
+		if (data.action !== "message" || !ackId) return;
 		useStore.setState((s) => ({
 			messages: {
 				...s.messages,
-				[msg.channel]: [
-					...(s.messages[msg.channel] ?? []),
-					{ id, sender: "you", text: msg.text },
+				[data.channel]: [
+					...(s.messages[data.channel] ?? []),
+					{ id: ackId, sender: "you", text: data.text },
 				],
 			},
 		}));
@@ -112,12 +111,15 @@ function useChat(channel: string) {
 	const sendMessage = useCallback(
 		(text: string) => {
 			const id = crypto.randomUUID();
-			manager.send(id, {
-				action: "message",
-				type: "conversation",
-				id,
-				channel,
-				text,
+			manager.send({
+				data: {
+					action: "message",
+					type: "conversation",
+					id,
+					channel,
+					text,
+				},
+				ackId: id,
 			});
 		},
 		[channel],

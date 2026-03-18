@@ -34,16 +34,20 @@ export type TManagerConfig<TClientMsg, TServerMsg> = {
 	ping?: TClientMsg;
 	isPong?: (msg: TServerMsg) => boolean;
 	onMessageReceived?: (msg: TServerMsg) => void;
-	onSendIntent?: <TMeta = unknown>(
-		id: string | null,
-		msg: TClientMsg,
-		meta?: TMeta,
-	) => void;
+	onSendIntent?: (params: TSendParams<TClientMsg>) => void;
 	onConnectionStateChange?: (state: TConnectionState) => void;
 	onReady?: () => void;
 	onInFlightDrop?: (messages: { id: string; data: TClientMsg }[]) => void;
 	onLastUnsubscribe?: (key: string, data: TClientMsg | undefined) => void;
 	onDebug?: (event: TDebugEvent<TClientMsg, TServerMsg>) => void;
+};
+
+// ── Send params ────────────────────────────────────────────────────
+
+export type TSendParams<TClientMsg> = {
+	data: TClientMsg;
+	ackId?: string;
+	meta?: unknown;
 };
 
 // ── Debug events ───────────────────────────────────────────────────
@@ -62,7 +66,7 @@ export type TDebugEventPayload<TClientMsg, TServerMsg> =
 	  }
 	| {
 			type: "message-sent";
-			messageId: string | null;
+			ackId: string | undefined;
 			raw: string;
 			deserialized: TClientMsg;
 	  }
@@ -80,7 +84,7 @@ export type TDebugEventPayload<TClientMsg, TServerMsg> =
 			raw?: string;
 			deserialized?: TClientMsg;
 	  }
-	| { type: "in-flight-ack"; messageId: string }
+	| { type: "in-flight-ack"; ackId: string }
 	| { type: "in-flight-drop"; ids: string[] }
 	| { type: "pending-subscription-resolved"; key: string }
 	| { type: "reconnect-scheduled"; attempt: number; delayMs: number }

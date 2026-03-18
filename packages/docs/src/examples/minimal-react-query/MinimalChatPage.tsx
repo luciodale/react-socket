@@ -59,12 +59,14 @@ export const manager = new WebSocketManager<TClientMsg, TServerMsg>({
 		queryClient.removeQueries({ queryKey: [key] });
 	},
 
-	onSendIntent(id, msg) {
-		if (msg.action !== "message" || !id) return;
-		// Optimistic update via React Query cache
+	onSendIntent({ data, ackId }) {
+		if (data.action !== "message" || !ackId) return;
 		queryClient.setQueryData<TMessage[]>(
-			[chatQueryKey(msg.channel)],
-			(prev) => [...(prev ?? []), { id, sender: "you", text: msg.text }],
+			[chatQueryKey(data.channel)],
+			(prev) => [
+				...(prev ?? []),
+				{ id: ackId, sender: "you", text: data.text },
+			],
 		);
 	},
 
@@ -124,12 +126,15 @@ function useChat(channel: string) {
 	const sendMessage = useCallback(
 		(text: string) => {
 			const id = crypto.randomUUID();
-			manager.send(id, {
-				action: "message",
-				type: "conversation",
-				id,
-				channel,
-				text,
+			manager.send({
+				data: {
+					action: "message",
+					type: "conversation",
+					id,
+					channel,
+					text,
+				},
+				ackId: id,
 			});
 		},
 		[channel],

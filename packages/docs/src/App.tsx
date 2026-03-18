@@ -10,16 +10,21 @@ import {
 	manager as reactQueryManager,
 } from "./examples/minimal-react-query/MinimalChatPage";
 import {
+	OpenAIRealtimePage,
+	manager as openaiManager,
+} from "./examples/openai-realtime/OpenAIRealtimePage";
+import {
 	UndeliveredSyncPage,
 	manager as undeliveredManager,
 } from "./examples/undelivered-sync/UndeliveredSyncPage";
 
-type TTab = "minimal" | "react-query" | "undelivered-sync";
+type TTab = "minimal" | "react-query" | "undelivered-sync" | "openai-realtime";
 
 const TABS: { key: TTab; label: string }[] = [
 	{ key: "minimal", label: "Minimal" },
 	{ key: "react-query", label: "React Query" },
 	{ key: "undelivered-sync", label: "Undelivered Sync" },
+	{ key: "openai-realtime", label: "OpenAI Realtime" },
 ];
 
 // Each example has its own manager — pick the active one for the inspector
@@ -31,6 +36,7 @@ const MANAGERS: Record<
 	minimal: minimalManager,
 	"react-query": reactQueryManager,
 	"undelivered-sync": undeliveredManager,
+	"openai-realtime": openaiManager,
 };
 
 const TAB_KEYS = new Set<string>(TABS.map((t) => t.key));
@@ -75,6 +81,7 @@ export function App() {
 			{activeTab === "minimal" && <MinimalPage />}
 			{activeTab === "react-query" && <ReactQueryPage />}
 			{activeTab === "undelivered-sync" && <UndeliveredSyncPage />}
+			{activeTab === "openai-realtime" && <OpenAIRealtimePage />}
 
 			<InspectorPanel manager={MANAGERS[activeTab]} />
 		</div>

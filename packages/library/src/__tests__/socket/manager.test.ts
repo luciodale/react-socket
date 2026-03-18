@@ -324,7 +324,7 @@ describe("WebSocketManager", () => {
 	describe("send", () => {
 		it("returns false when not connected", () => {
 			const { manager } = createManager();
-			const sent = manager.send("msg1", { text: "hi" });
+			const sent = manager.send({ data: { text: "hi" }, ackId: "msg1" });
 			expect(sent).toBe(false);
 		});
 
@@ -335,7 +335,7 @@ describe("WebSocketManager", () => {
 			transport.sentMessages = [];
 
 			const msg = { text: "hello" };
-			const sent = manager.send("msg1", msg);
+			const sent = manager.send({ data: msg, ackId: "msg1" });
 			expect(sent).toBe(true);
 			expect(transport.sentMessages).toHaveLength(1);
 			expect(JSON.parse(transport.sentMessages[0])).toEqual(msg);
@@ -347,7 +347,7 @@ describe("WebSocketManager", () => {
 			transport.simulateOpen();
 			transport.sentMessages = [];
 
-			const sent = manager.send(null, { text: "hello" });
+			const sent = manager.send({ data: { text: "hello" } });
 			expect(sent).toBe(true);
 			expect(transport.sentMessages).toHaveLength(1);
 		});
@@ -357,7 +357,7 @@ describe("WebSocketManager", () => {
 			manager.connect();
 			transport.simulateOpen();
 
-			manager.send("msg1", { text: "hello" });
+			manager.send({ data: { text: "hello" }, ackId: "msg1" });
 			manager.ackInFlight("msg1");
 
 			// verify no in-flight drop on disconnect
@@ -368,45 +368,57 @@ describe("WebSocketManager", () => {
 	});
 
 	describe("onSendIntent", () => {
-		it("fires on every send() call with id and message", () => {
-			const intents: { id: string | null; msg: TTestClientMsg }[] = [];
+		it("fires on every send() call with data and ackId", () => {
+			const intents: { data: TTestClientMsg; ackId?: string }[] = [];
 			const transport = new MockTransport();
 			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
 				...testSerialization,
 				url: "ws://test",
 				transport,
-				onSendIntent(id, msg) {
-					intents.push({ id, msg });
+				onSendIntent({ data, ackId }) {
+					intents.push({ data, ackId });
 				},
 			});
 			manager.connect();
 			transport.simulateOpen();
 
-			manager.send("msg-1", { action: "message" });
-			manager.send(null, { action: "ping" });
+			manager.send({ data: { action: "message" }, ackId: "msg-1" });
+			manager.send({ data: { action: "ping" } });
 
 			expect(intents).toHaveLength(2);
-			expect(intents[0]).toEqual({ id: "msg-1", msg: { action: "message" } });
-			expect(intents[1]).toEqual({ id: null, msg: { action: "ping" } });
+			expect(intents[0]).toEqual({
+				data: { action: "message" },
+				ackId: "msg-1",
+			});
+			expect(intents[1]).toEqual({
+				data: { action: "ping" },
+				ackId: undefined,
+			});
 		});
 
 		it("fires even when not connected (send returns false)", () => {
-			const intents: { id: string | null; msg: TTestClientMsg }[] = [];
+			const intents: { data: TTestClientMsg; ackId?: string }[] = [];
 			const transport = new MockTransport();
 			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
 				...testSerialization,
 				url: "ws://test",
 				transport,
-				onSendIntent(id, msg) {
-					intents.push({ id, msg });
+				onSendIntent({ data, ackId }) {
+					intents.push({ data, ackId });
 				},
 			});
 			// Not connected — send() will return false
-			const result = manager.send("msg-1", { action: "message" });
+			const result = manager.send({
+				data: { action: "message" },
+				ackId: "msg-1",
+			});
 
 			expect(result).toBe(false);
 			expect(intents).toHaveLength(1);
-			expect(intents[0]).toEqual({ id: "msg-1", msg: { action: "message" } });
+			expect(intents[0]).toEqual({
+				data: { action: "message" },
+				ackId: "msg-1",
+			});
 		});
 	});
 
@@ -482,7 +494,7 @@ describe("WebSocketManager", () => {
 			manager.connect();
 			transport.simulateOpen();
 
-			manager.send("msg1", { text: "hello" });
+			manager.send({ data: { text: "hello" }, ackId: "msg1" });
 			transport.simulateClose(1006);
 
 			expect(droppedInFlightMaps).toHaveLength(1);
@@ -504,7 +516,7 @@ describe("WebSocketManager", () => {
 			manager.connect();
 			transport.simulateOpen();
 
-			manager.send("msg1", { text: "hello" });
+			manager.send({ data: { text: "hello" }, ackId: "msg1" });
 			manager.ackInFlight("msg1");
 
 			transport.simulateClose(1006);
@@ -516,7 +528,7 @@ describe("WebSocketManager", () => {
 			manager.connect();
 			transport.simulateOpen();
 
-			manager.send(null, { text: "hello" });
+			manager.send({ data: { text: "hello" } });
 			transport.simulateClose(1006);
 			expect(droppedInFlightMaps).toHaveLength(0);
 		});
@@ -792,8 +804,8 @@ describe("WebSocketManager", () => {
 			manager.connect();
 			transport.simulateOpen();
 
-			manager.send("id-1", { action: "msg1" });
-			manager.send("id-2", { action: "msg2" });
+			manager.send({ data: { action: "msg1" }, ackId: "id-1" });
+			manager.send({ data: { action: "msg2" }, ackId: "id-2" });
 
 			manager.forceReconnect();
 

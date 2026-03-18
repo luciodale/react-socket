@@ -9,6 +9,7 @@ export type {
 	TDebugEventPayload,
 	TDebugEventType,
 	TManagerConfig,
+	TSendParams,
 } from "./types";
 export type { TUndeliveredSync } from "./undelivered-sync";
 export { createUndeliveredSync } from "./undelivered-sync";
