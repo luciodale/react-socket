@@ -125,10 +125,10 @@ function onMessage(
 }
 
 function onInFlightDrop(
-	ids: string[],
+	messages: { id: string; data: TClientMsg }[],
 	useStore: ReturnType<typeof createTestStore>["useStore"],
 ) {
-	for (const id of ids) {
+	for (const { id } of messages) {
 		useStore.setState((s) => {
 			for (const [channel, msgs] of Object.entries(s.messages)) {
 				const idx = msgs.findIndex((m) => m.id === id);
@@ -172,11 +172,11 @@ function createConnectedManager(
 		reconnectBaseDelayMs: 10,
 		reconnectMaxAttempts: 3,
 		reconnectMaxDelayMs: 100,
-		onMessage(msg) {
+		onMessageReceived(msg) {
 			onMessage(msg, useStore);
 		},
-		onInFlightDrop(ids) {
-			onInFlightDrop(ids, useStore);
+		onInFlightDrop(messages) {
+			onInFlightDrop(messages, useStore);
 		},
 	});
 
@@ -195,7 +195,7 @@ beforeEach(() => {
 	useStore = t.useStore;
 });
 
-describe("store via onMessage callback", () => {
+describe("store via onMessageReceived callback", () => {
 	describe("event delivery", () => {
 		it("appends event to channel", () => {
 			const { transport } = createConnectedManager(useStore);

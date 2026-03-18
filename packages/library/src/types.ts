@@ -33,11 +33,16 @@ export type TManagerConfig<TClientMsg, TServerMsg> = {
 	reconnectMaxDelayMs?: number;
 	ping?: TClientMsg;
 	isPong?: (msg: TServerMsg) => boolean;
-	onMessage?: (msg: TServerMsg) => void;
+	onMessageReceived?: (msg: TServerMsg) => void;
+	onSendIntent?: <TMeta = unknown>(
+		id: string | null,
+		msg: TClientMsg,
+		meta?: TMeta,
+	) => void;
 	onConnectionStateChange?: (state: TConnectionState) => void;
 	onReady?: () => void;
-	onInFlightDrop?: (ids: string[]) => void;
-	onLastUnsubscribe?: (key: string) => void;
+	onInFlightDrop?: (messages: { id: string; data: TClientMsg }[]) => void;
+	onLastUnsubscribe?: (key: string, data: TClientMsg | undefined) => void;
 	onDebug?: (event: TDebugEvent<TClientMsg, TServerMsg>) => void;
 };
 

@@ -25,7 +25,7 @@ function unsubMsg(type: string, channel: string): TTestClientMsg {
 
 function createManager(overrides?: {
 	transport?: MockTransport;
-	onMessage?: (msg: TTestServerMsg) => void;
+	onMessageReceived?: (msg: TTestServerMsg) => void;
 	onDebug?: (event: TDebugEvent<TTestClientMsg, TTestServerMsg>) => void;
 	ping?: TTestClientMsg;
 	isPong?: (msg: TTestServerMsg) => boolean;
@@ -48,7 +48,7 @@ function createManager(overrides?: {
 		reconnectMaxDelayMs: 100,
 		ping: overrides?.ping,
 		isPong: overrides?.isPong,
-		onMessage: overrides?.onMessage,
+		onMessageReceived: overrides?.onMessageReceived,
 		onDebug: (event) => {
 			events.push(event);
 			overrides?.onDebug?.(event);

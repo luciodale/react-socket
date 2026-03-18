@@ -25,11 +25,11 @@ function unsubMsg(type: string, channel: string): TTestClientMsg {
 
 function createManager(overrides?: {
 	transport?: MockTransport;
-	onMessage?: (msg: TTestServerMsg) => void;
+	onMessageReceived?: (msg: TTestServerMsg) => void;
 	onConnectionStateChange?: (state: TConnectionState) => void;
 	onReady?: () => void;
-	onInFlightDrop?: (ids: string[]) => void;
-	onLastUnsubscribe?: (key: string) => void;
+	onInFlightDrop?: (messages: { id: string; data: TTestClientMsg }[]) => void;
+	onLastUnsubscribe?: (key: string, data: TTestClientMsg | undefined) => void;
 	ping?: TTestClientMsg;
 	isPong?: (msg: TTestServerMsg) => boolean;
 	pingIntervalMs?: number;
@@ -41,7 +41,7 @@ function createManager(overrides?: {
 	const states: TConnectionState[] = [];
 	const rawMessages: TTestServerMsg[] = [];
 	const readyCalls: number[] = [];
-	const droppedInFlightIds: string[][] = [];
+	const droppedInFlightMaps: { id: string; data: TTestClientMsg }[][] = [];
 
 	const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
 		...testSerialization,
@@ -54,9 +54,9 @@ function createManager(overrides?: {
 		reconnectMaxDelayMs: 100,
 		ping: overrides?.ping,
 		isPong: overrides?.isPong,
-		onMessage: (msg) => {
+		onMessageReceived: (msg) => {
 			rawMessages.push(msg);
-			overrides?.onMessage?.(msg);
+			overrides?.onMessageReceived?.(msg);
 		},
 		onConnectionStateChange: (state) => {
 			states.push(state);
@@ -66,9 +66,9 @@ function createManager(overrides?: {
 			readyCalls.push(1);
 			overrides?.onReady?.();
 		},
-		onInFlightDrop: (ids) => {
-			droppedInFlightIds.push([...ids]);
-			overrides?.onInFlightDrop?.(ids);
+		onInFlightDrop: (messages) => {
+			droppedInFlightMaps.push(messages);
+			overrides?.onInFlightDrop?.(messages);
 		},
 		onLastUnsubscribe: overrides?.onLastUnsubscribe,
 	});
@@ -79,7 +79,7 @@ function createManager(overrides?: {
 		states,
 		rawMessages,
 		readyCalls,
-		droppedInFlightIds,
+		droppedInFlightMaps,
 	};
 }
 
@@ -362,13 +362,56 @@ describe("WebSocketManager", () => {
 
 			// verify no in-flight drop on disconnect
 			transport.simulateClose(1006);
-			const { droppedInFlightIds } = createManager();
-			expect(droppedInFlightIds).toHaveLength(0);
+			const { droppedInFlightMaps } = createManager();
+			expect(droppedInFlightMaps).toHaveLength(0);
 		});
 	});
 
-	describe("onMessage", () => {
-		it("passes deserialized message to onMessage callback", () => {
+	describe("onSendIntent", () => {
+		it("fires on every send() call with id and message", () => {
+			const intents: { id: string | null; msg: TTestClientMsg }[] = [];
+			const transport = new MockTransport();
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+				onSendIntent(id, msg) {
+					intents.push({ id, msg });
+				},
+			});
+			manager.connect();
+			transport.simulateOpen();
+
+			manager.send("msg-1", { action: "message" });
+			manager.send(null, { action: "ping" });
+
+			expect(intents).toHaveLength(2);
+			expect(intents[0]).toEqual({ id: "msg-1", msg: { action: "message" } });
+			expect(intents[1]).toEqual({ id: null, msg: { action: "ping" } });
+		});
+
+		it("fires even when not connected (send returns false)", () => {
+			const intents: { id: string | null; msg: TTestClientMsg }[] = [];
+			const transport = new MockTransport();
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+				onSendIntent(id, msg) {
+					intents.push({ id, msg });
+				},
+			});
+			// Not connected — send() will return false
+			const result = manager.send("msg-1", { action: "message" });
+
+			expect(result).toBe(false);
+			expect(intents).toHaveLength(1);
+			expect(intents[0]).toEqual({ id: "msg-1", msg: { action: "message" } });
+		});
+	});
+
+	describe("onMessageReceived", () => {
+		it("passes deserialized message to onMessageReceived callback", () => {
 			const { manager, transport, rawMessages } = createManager();
 			manager.connect();
 			transport.simulateOpen();
@@ -434,28 +477,30 @@ describe("WebSocketManager", () => {
 	});
 
 	describe("onInFlightDrop", () => {
-		it("fires with in-flight message ids on disconnect", () => {
-			const { manager, transport, droppedInFlightIds } = createManager();
+		it("fires with in-flight messages map on disconnect", () => {
+			const { manager, transport, droppedInFlightMaps } = createManager();
 			manager.connect();
 			transport.simulateOpen();
 
 			manager.send("msg1", { text: "hello" });
 			transport.simulateClose(1006);
 
-			expect(droppedInFlightIds).toHaveLength(1);
-			expect(droppedInFlightIds[0]).toContain("msg1");
+			expect(droppedInFlightMaps).toHaveLength(1);
+			expect(droppedInFlightMaps[0]).toEqual([
+				{ id: "msg1", data: { text: "hello" } },
+			]);
 		});
 
 		it("does not fire when no in-flight messages", () => {
-			const { manager, transport, droppedInFlightIds } = createManager();
+			const { manager, transport, droppedInFlightMaps } = createManager();
 			manager.connect();
 			transport.simulateOpen();
 			transport.simulateClose(1006);
-			expect(droppedInFlightIds).toHaveLength(0);
+			expect(droppedInFlightMaps).toHaveLength(0);
 		});
 
 		it("does not fire for acked messages", () => {
-			const { manager, transport, droppedInFlightIds } = createManager();
+			const { manager, transport, droppedInFlightMaps } = createManager();
 			manager.connect();
 			transport.simulateOpen();
 
@@ -463,17 +508,17 @@ describe("WebSocketManager", () => {
 			manager.ackInFlight("msg1");
 
 			transport.simulateClose(1006);
-			expect(droppedInFlightIds).toHaveLength(0);
+			expect(droppedInFlightMaps).toHaveLength(0);
 		});
 
 		it("null-id sends are not tracked as in-flight", () => {
-			const { manager, transport, droppedInFlightIds } = createManager();
+			const { manager, transport, droppedInFlightMaps } = createManager();
 			manager.connect();
 			transport.simulateOpen();
 
 			manager.send(null, { text: "hello" });
 			transport.simulateClose(1006);
-			expect(droppedInFlightIds).toHaveLength(0);
+			expect(droppedInFlightMaps).toHaveLength(0);
 		});
 	});
 
@@ -611,7 +656,7 @@ describe("WebSocketManager", () => {
 	});
 
 	describe("online/offline handlers", () => {
-		it("offline sets reconnecting when connected", () => {
+		it("offline tears down socket and sets reconnecting", () => {
 			const { manager, transport, states } = createManager();
 			manager.connect();
 			transport.simulateOpen();
@@ -619,32 +664,21 @@ describe("WebSocketManager", () => {
 			window.dispatchEvent(new Event("offline"));
 
 			expect(states[states.length - 1]).toBe("reconnecting");
+			expect(transport.disconnectCalls.length).toBeGreaterThan(0);
 		});
 
-		it("online triggers reconnect when disconnected from offline", () => {
-			const { manager, transport } = createManager({
-				reconnectMaxAttempts: 1,
+		it("online reconnects after offline", () => {
+			const { manager, transport, states } = createManager({
 				reconnectBaseDelayMs: 10,
 			});
 			manager.connect();
 			transport.simulateOpen();
 
 			window.dispatchEvent(new Event("offline"));
-			// Simulate the socket close that the browser triggers on network loss
-			transport.simulateClose(1006);
-
-			// handleClose → scheduleReconnect (attempt 0→1), after timer fires it
-			// will try to reconnect. Advance to trigger that attempt, then fail it
-			// so we exhaust max attempts and land on "disconnected".
-			vi.advanceTimersByTime(10_000);
-			// The reconnect attempt fires; simulate another failure
-			transport.simulateClose(1006);
-			// Now attempt(1) >= maxAttempts(1) → "disconnected"
-			expect(manager.getConnectionState()).toBe("disconnected");
+			expect(states[states.length - 1]).toBe("reconnecting");
 
 			const callsBefore = transport.connectCalls.length;
 
-			// handleOnline resets reconnectAttempt to 0 and calls scheduleReconnect
 			window.dispatchEvent(new Event("online"));
 			vi.advanceTimersByTime(10_000);
 
@@ -754,7 +788,7 @@ describe("WebSocketManager", () => {
 		});
 
 		it("drops in-flight messages", () => {
-			const { manager, transport, droppedInFlightIds } = createManager();
+			const { manager, transport, droppedInFlightMaps } = createManager();
 			manager.connect();
 			transport.simulateOpen();
 
@@ -763,10 +797,10 @@ describe("WebSocketManager", () => {
 
 			manager.forceReconnect();
 
-			expect(droppedInFlightIds).toHaveLength(1);
-			expect(droppedInFlightIds[0]).toEqual(
-				expect.arrayContaining(["id-1", "id-2"]),
-			);
+			expect(droppedInFlightMaps).toHaveLength(1);
+			const ids = droppedInFlightMaps[0].map((m) => m.id);
+			expect(ids).toContain("id-1");
+			expect(ids).toContain("id-2");
 		});
 
 		it("is a no-op when disposed", () => {

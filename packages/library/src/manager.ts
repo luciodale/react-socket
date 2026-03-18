@@ -28,10 +28,14 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 	private readonly ping: TClientMsg | undefined;
 	private readonly isPong: ((msg: TServerMsg) => boolean) | undefined;
 
-	private readonly onMessageCb: TManagerConfig<
+	private readonly onMessageReceivedCb: TManagerConfig<
 		TClientMsg,
 		TServerMsg
-	>["onMessage"];
+	>["onMessageReceived"];
+	private readonly onSendIntentCb: TManagerConfig<
+		TClientMsg,
+		TServerMsg
+	>["onSendIntent"];
 	private readonly onConnectionStateChange: TManagerConfig<
 		TClientMsg,
 		TServerMsg
@@ -81,7 +85,8 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 			config.reconnectMaxDelayMs ?? RECONNECT_MAX_DELAY_MS;
 		this.ping = config.ping;
 		this.isPong = config.isPong;
-		this.onMessageCb = config.onMessage;
+		this.onMessageReceivedCb = config.onMessageReceived;
+		this.onSendIntentCb = config.onSendIntent;
 		this.onConnectionStateChange = config.onConnectionStateChange;
 		this.onReady = config.onReady;
 		this.onInFlightDrop = config.onInFlightDrop;
@@ -135,10 +140,16 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 		this.pendingSubscriptions.clear();
 
 		if (this.inFlightMessages.size > 0) {
-			const ids = Array.from(this.inFlightMessages.keys());
-			this.onInFlightDrop?.(ids);
+			const messages = Array.from(this.inFlightMessages, ([id, data]) => ({
+				id,
+				data,
+			}));
+			this.onInFlightDrop?.(messages);
+			this.emitDebug({
+				type: "in-flight-drop",
+				ids: messages.map((m) => m.id),
+			});
 			this.inFlightMessages.clear();
-			this.emitDebug({ type: "in-flight-drop", ids });
 		}
 
 		// Detach old handlers to prevent stale close events from interfering
@@ -194,13 +205,14 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 
 		const next = current - 1;
 		if (next === 0) {
+			const storedData = this.subscriptionData.get(key);
 			this.subscriptionRefCounts.delete(key);
 			this.subscriptionData.delete(key);
 			this.pendingSubscriptions.delete(key);
 			if (data && this.connectionState === "connected") {
 				this.rawSend(this.serialize(data));
 			}
-			this.onLastUnsubscribe?.(key);
+			this.onLastUnsubscribe?.(key, storedData);
 		} else {
 			this.subscriptionRefCounts.set(key, next);
 		}
@@ -237,7 +249,12 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 
 	// ── Sending ───────────────────────────────────────────────────────
 
-	send(id: string | null, msg: TClientMsg): boolean {
+	send<TMeta = unknown>(
+		id: string | null,
+		msg: TClientMsg,
+		meta?: TMeta,
+	): boolean {
+		this.onSendIntentCb?.(id, msg, meta);
 		if (this.connectionState !== "connected") return false;
 		const serialized = this.serialize(msg);
 		const sent = this.rawSend(serialized);
@@ -325,10 +342,16 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 		this.pendingSubscriptions.clear();
 
 		if (this.inFlightMessages.size > 0) {
-			const ids = Array.from(this.inFlightMessages.keys());
-			this.onInFlightDrop?.(ids);
+			const messages = Array.from(this.inFlightMessages, ([id, data]) => ({
+				id,
+				data,
+			}));
+			this.onInFlightDrop?.(messages);
+			this.emitDebug({
+				type: "in-flight-drop",
+				ids: messages.map((m) => m.id),
+			});
 			this.inFlightMessages.clear();
-			this.emitDebug({ type: "in-flight-drop", ids });
 		}
 
 		if (this.intentionalClose || this.disposed) {
@@ -371,11 +394,15 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 			deserialized: parsed,
 			isPong: false,
 		});
-		this.onMessageCb?.(parsed);
+		this.onMessageReceivedCb?.(parsed);
 	}
 
 	private handleOnline(): void {
-		if (this.connectionState === "disconnected" && !this.intentionalClose) {
+		if (this.intentionalClose || this.disposed) return;
+		if (
+			this.connectionState === "disconnected" ||
+			this.connectionState === "reconnecting"
+		) {
 			this.reconnectAttempt = 0;
 			this.scheduleReconnect();
 		}
@@ -383,9 +410,9 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 
 	private handleOffline(): void {
 		this.clearTimers();
-		if (this.connectionState !== "disconnected") {
-			this.setConnectionState("reconnecting");
-		}
+		this.transport.onclose = null;
+		this.transport.disconnect(4000, "offline");
+		this.setConnectionState("reconnecting");
 	}
 
 	// ── Private: reconnection ─────────────────────────────────────────

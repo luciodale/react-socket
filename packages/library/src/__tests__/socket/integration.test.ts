@@ -78,7 +78,7 @@ function createTestSystem(
 		reconnectBaseDelayMs: 10,
 		reconnectMaxAttempts: 3,
 		reconnectMaxDelayMs: 100,
-		onMessage(msg) {
+		onMessageReceived(msg) {
 			// resolve subscription acks
 			if (msg.action === "subscribe_ack" && "type" in msg && "channel" in msg) {
 				manager.resolvePendingSubscription(`${msg.type}:${msg.channel}`);
@@ -170,8 +170,8 @@ function createTestSystem(
 			connectionStates.push(state);
 		},
 		onReady() {},
-		onInFlightDrop(ids) {
-			for (const id of ids) {
+		onInFlightDrop(messages) {
+			for (const { id } of messages) {
 				useStore.setState((s) => {
 					for (const [channel, msgs] of Object.entries(s.messages)) {
 						const idx = msgs.findIndex((m) => m.id === id);

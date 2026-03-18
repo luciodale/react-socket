@@ -10,6 +10,11 @@ type TClientMsg =
 			id: string;
 			channel: string;
 			text: string;
+	  }
+	| {
+			action: "unreliable_message";
+			id: string;
+			text: string;
 	  };
 
 type TServerMsg =
@@ -79,6 +84,19 @@ function handleMessage(ws: { send: (data: string) => void }, msg: TClientMsg) {
 				};
 				ws.send(JSON.stringify(reply));
 			}, 300);
+			break;
+		}
+
+		case "unreliable_message": {
+			// 50% chance to drop the ack (for undelivered-sync example)
+			if (Math.random() < 0.5) {
+				console.log(`[drop] ${msg.id} — no ack sent`);
+				break;
+			}
+
+			ws.send(
+				JSON.stringify({ action: "message", id: msg.id, text: msg.text }),
+			);
 			break;
 		}
 	}

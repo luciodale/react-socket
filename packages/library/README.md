@@ -20,7 +20,7 @@ const manager = new WebSocketManager<ClientMsg, ServerMsg>({
   url: "wss://api.example.com/ws",
   serialize: (msg) => JSON.stringify(msg),
   deserialize: (raw) => JSON.parse(raw),
-  onMessage: (msg) => console.log("Received:", msg),
+  onMessageReceived: (msg) => console.log("Received:", msg),
 });
 
 manager.connect();
@@ -55,12 +55,13 @@ const manager = new WebSocketManager<ClientMsg, ServerMsg>({
   transport: myCustomTransport,
 
   // Callbacks
-  onMessage: (msg) => {},
+  onMessageReceived: (msg) => {},                // server → client
+  onSendIntent: (id, msg, meta?) => {},          // fires on every send() — for optimistic updates
   onConnectionStateChange: (state) => {},
-  onReady: () => {},                      // fires after connect + subscription restore
-  onInFlightDrop: (ids) => {},            // fires when unacked messages are lost
-  onLastUnsubscribe: (key) => {},         // fires when last ref to a key is removed
-  onDebug: (event) => {},                 // all internal events (for logging)
+  onReady: () => {},                             // fires after connect + subscription restore
+  onInFlightDrop: (messages) => {},              // { id, data }[] — unacked messages lost on disconnect
+  onLastUnsubscribe: (key, data) => {},          // key + subscription data when last ref removed
+  onDebug: (event) => {},                        // all internal events (for logging)
 });
 ```
 
@@ -101,11 +102,40 @@ manager.send(null, { action: "typing", channel: "room1" });
 // With in-flight tracking (pass a unique ID)
 manager.send("msg-123", { action: "chat", text: "hello" });
 
+// With meta — passed through to onSendIntent for optimistic updates
+manager.send("msg-123", { action: "chat", text: "hello" }, { sentAt: Date.now() });
+
 // Acknowledge delivery (removes from in-flight map)
 manager.ackInFlight("msg-123");
 ```
 
-If the connection drops while messages are in-flight, `onInFlightDrop` fires with the unacknowledged IDs.
+If the connection drops while messages are in-flight, `onInFlightDrop` fires with an array of `{ id, data }` objects containing both the message ID and the original message data.
+
+### Optimistic updates with `onSendIntent`
+
+`onSendIntent` fires at the top of every `send()` call — **before** the connection check. This makes it the right place for optimistic UI updates:
+
+```tsx
+const manager = new WebSocketManager({
+  // ...
+  onSendIntent(id, msg, meta) {
+    if (msg.action !== "message" || !id) return;
+    // Add to UI immediately — no need to wait for server echo
+    store.addMessage({ id, sender: "you", text: msg.text });
+  },
+  onMessageReceived(msg) {
+    if (msg.action !== "message") return;
+    manager.ackInFlight(msg.id);
+    // Skip messages we already added optimistically (same id)
+    store.addMessageIfNew(msg);
+  },
+});
+
+// Call site is just one line — all state logic lives in the callbacks
+manager.send(id, { action: "message", id, channel, text });
+```
+
+The optional third argument (`meta`) passes through to `onSendIntent` for data that isn't part of the wire message but is needed for the UI update.
 
 ### Pending subscriptions
 
@@ -173,18 +203,6 @@ App.addListener("appStateChange", ({ isActive }) => {
 - Subscriptions are automatically restored once reconnected
 - No-op if the manager is disposed
 
-For React Native, use `AppState`:
-
-```tsx
-import { AppState } from "react-native";
-
-AppState.addEventListener("change", (state) => {
-  if (state === "active") {
-    manager.forceReconnect();
-  }
-});
-```
-
 ## Undelivered message sync
 
 For offline-capable apps, `createUndeliveredSync` provides a storage-backed queue for messages that haven't been acknowledged by the server.
@@ -215,6 +233,30 @@ sync.setChannelMessages("room1", messages);
 sync.clearChannel("room1");
 sync.clearAll();
 ```
+
+### Reactive reads with `useSyncExternalStore`
+
+The sync queue supports subscriptions, so you can read from it reactively without polling:
+
+```tsx
+import { useSyncExternalStore, useMemo } from "react";
+
+function useUndelivered(channel: string) {
+  const undelivered = useSyncExternalStore(
+    sync.subscribe,
+    () => sync.getChannelMessages(channel),
+  );
+
+  const undeliveredIds = useMemo(
+    () => new Set(undelivered.map((m) => m.id)),
+    [undelivered],
+  );
+
+  return { undelivered, undeliveredIds };
+}
+```
+
+### Custom storage
 
 You can implement `IStorage` for any async key-value store (AsyncStorage, IndexedDB, etc.):
 

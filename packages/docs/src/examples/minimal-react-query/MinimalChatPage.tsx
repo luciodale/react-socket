@@ -1,5 +1,4 @@
 import { useConnectionState, WebSocketManager } from "@luciodale/react-socket";
-import { InspectorPanel } from "@luciodale/react-socket/inspector";
 import {
 	QueryClient,
 	QueryClientProvider,
@@ -45,22 +44,31 @@ const queryClient = new QueryClient({
 function chatQueryKey(channelId: string) {
 	return JSON.stringify(["message", channelId]);
 }
+
 // ── Manager ─────────────────────────────────────────────────────────
 
-const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+export const manager = new WebSocketManager<TClientMsg, TServerMsg>({
 	url: "ws://localhost:3001/ws",
 	serialize: (msg) => JSON.stringify(msg),
 	deserialize: (raw) => JSON.parse(raw) as TServerMsg,
 
 	ping: { action: "ping" },
 	isPong: (msg) => msg.action === "pong",
-	onLastUnsubscribe(key) {
-		queryClient.removeQueries({
-			queryKey: [key],
-		});
+
+	onLastUnsubscribe(key, _data) {
+		queryClient.removeQueries({ queryKey: [key] });
 	},
 
-	onMessage(msg) {
+	onSendIntent(id, msg) {
+		if (msg.action !== "message" || !id) return;
+		// Optimistic update via React Query cache
+		queryClient.setQueryData<TMessage[]>(
+			[chatQueryKey(msg.channel)],
+			(prev) => [...(prev ?? []), { id, sender: "you", text: msg.text }],
+		);
+	},
+
+	onMessageReceived(msg) {
 		if (msg.action === "subscribe_ack") {
 			manager.resolvePendingSubscription(chatQueryKey(msg.channel));
 			return;
@@ -68,12 +76,16 @@ const manager = new WebSocketManager<TClientMsg, TServerMsg>({
 
 		if (msg.action === "message") {
 			manager.ackInFlight(msg.id);
+			// Skip echoes we already added optimistically
 			queryClient.setQueryData<TMessage[]>(
 				[chatQueryKey(msg.channel)],
-				(prev) => [
-					...(prev ?? []),
-					{ id: msg.id, sender: msg.sender, text: msg.text },
-				],
+				(prev) => {
+					if (prev?.some((m) => m.id === msg.id)) return prev;
+					return [
+						...(prev ?? []),
+						{ id: msg.id, sender: msg.sender, text: msg.text },
+					];
+				},
 			);
 		}
 	},
@@ -96,7 +108,7 @@ function useMessages(channel: string): TMessage[] {
 				channel,
 			});
 		};
-	}, [channel]);
+	}, [channel, chatQueryKeyString]);
 
 	const { data } = useQuery<TMessage[]>({
 		queryKey: [chatQueryKeyString],
@@ -216,7 +228,6 @@ export function MinimalChatPage() {
 
 				<ChatRoom channel={channel} />
 			</div>
-			<InspectorPanel manager={manager} />
 		</QueryClientProvider>
 	);
 }

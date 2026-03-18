@@ -1,5 +1,4 @@
-import type { TConnectionState } from "@luciodale/react-socket";
-import { WebSocketManager } from "@luciodale/react-socket";
+import { useConnectionState, WebSocketManager } from "@luciodale/react-socket";
 import { useCallback, useEffect, useState } from "react";
 import { create } from "zustand";
 
@@ -34,19 +33,13 @@ type TServerMsg =
 
 // ── Store ────────────────────────────────────────────────────────────
 
-type TStore = {
-	connectionState: TConnectionState;
-	messages: Record<string, TMessage[]>;
-};
-
-const useStore = create<TStore>()(() => ({
-	connectionState: "disconnected",
+const useStore = create<{ messages: Record<string, TMessage[]> }>()(() => ({
 	messages: {},
 }));
 
 // ── Manager ──────────────────────────────────────────────────────────
 
-const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+export const manager = new WebSocketManager<TClientMsg, TServerMsg>({
 	url: "ws://localhost:3001/ws",
 	serialize: (msg) => JSON.stringify(msg),
 	deserialize: (raw) => JSON.parse(raw) as TServerMsg,
@@ -54,31 +47,43 @@ const manager = new WebSocketManager<TClientMsg, TServerMsg>({
 	ping: { action: "ping" },
 	isPong: (msg) => msg.action === "pong",
 
-	onConnectionStateChange(state) {
-		useStore.setState({ connectionState: state });
+	onSendIntent(id, msg) {
+		if (msg.action !== "message" || !id) return;
+		// Optimistic update — show the message immediately
+		useStore.setState((s) => ({
+			messages: {
+				...s.messages,
+				[msg.channel]: [
+					...(s.messages[msg.channel] ?? []),
+					{ id, sender: "you", text: msg.text },
+				],
+			},
+		}));
 	},
 
-	onMessage(msg) {
+	onMessageReceived(msg) {
 		if (msg.action === "subscribe_ack") {
 			manager.resolvePendingSubscription(`${msg.type}:${msg.channel}`);
 			return;
 		}
-
-		if (msg.action === "unsubscribe_ack") {
-			return;
-		}
+		if (msg.action === "unsubscribe_ack") return;
 
 		if (msg.action === "message") {
 			manager.ackInFlight(msg.id);
-			useStore.setState((s) => ({
-				messages: {
-					...s.messages,
-					[msg.channel]: [
-						...(s.messages[msg.channel] ?? []),
-						{ id: msg.id, sender: msg.sender, text: msg.text },
-					],
-				},
-			}));
+			// Skip echoes we already added optimistically
+			useStore.setState((s) => {
+				const existing = s.messages[msg.channel] ?? [];
+				if (existing.some((m) => m.id === msg.id)) return s;
+				return {
+					messages: {
+						...s.messages,
+						[msg.channel]: [
+							...existing,
+							{ id: msg.id, sender: msg.sender, text: msg.text },
+						],
+					},
+				};
+			});
 		}
 	},
 });
@@ -87,6 +92,22 @@ const manager = new WebSocketManager<TClientMsg, TServerMsg>({
 
 function useChat(channel: string) {
 	const messages = useStore((s) => s.messages[channel] ?? EMPTY);
+
+	useEffect(() => {
+		manager.subscribe(`conversation:${channel}`, {
+			action: "subscribe",
+			type: "conversation",
+			channel,
+		});
+
+		return () => {
+			manager.unsubscribe(`conversation:${channel}`, {
+				action: "unsubscribe",
+				type: "conversation",
+				channel,
+			});
+		};
+	}, [channel]);
 
 	const sendMessage = useCallback(
 		(text: string) => {
@@ -111,23 +132,8 @@ const EMPTY: TMessage[] = [];
 
 function ChatRoom({ channel }: { channel: string }) {
 	const [input, setInput] = useState("");
-	const connectionState = useStore((s) => s.connectionState);
+	const connectionState = useConnectionState(manager);
 	const { messages, sendMessage } = useChat(channel);
-
-	useEffect(() => {
-		manager.subscribe(`conversation:${channel}`, {
-			action: "subscribe",
-			type: "conversation",
-			channel,
-		});
-		return () => {
-			manager.unsubscribe(`conversation:${channel}`, {
-				action: "unsubscribe",
-				type: "conversation",
-				channel,
-			});
-		};
-	}, [channel]);
 
 	function handleSend() {
 		if (!input.trim()) return;

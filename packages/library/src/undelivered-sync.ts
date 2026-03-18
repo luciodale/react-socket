@@ -5,15 +5,22 @@ type TUndeliveredSyncConfig = {
 	storageKey?: string;
 };
 
+const EMPTY: never[] = [];
+
 export function createUndeliveredSync<T extends { id: string }>(
 	config: TUndeliveredSyncConfig,
 ) {
 	const { storage, storageKey = "ws_undelivered_messages" } = config;
 	let cache: Record<string, T[]> = {};
 	let initialized = false;
+	const listeners = new Set<() => void>();
 
 	function persist(): void {
 		storage.setItem(storageKey, JSON.stringify(cache)).catch(() => {});
+	}
+
+	function notify(): void {
+		for (const listener of listeners) listener();
 	}
 
 	async function init(): Promise<void> {
@@ -33,6 +40,7 @@ export function createUndeliveredSync<T extends { id: string }>(
 			// Corrupted or unavailable — start empty
 		}
 		initialized = true;
+		notify();
 	}
 
 	return {
@@ -42,8 +50,15 @@ export function createUndeliveredSync<T extends { id: string }>(
 			return initialized;
 		},
 
+		subscribe(listener: () => void): () => void {
+			listeners.add(listener);
+			return () => {
+				listeners.delete(listener);
+			};
+		},
+
 		getChannelMessages(channel: string): T[] {
-			return cache[channel] ?? [];
+			return cache[channel] ?? EMPTY;
 		},
 
 		addMessage(channel: string, msg: T): void {
@@ -51,6 +66,7 @@ export function createUndeliveredSync<T extends { id: string }>(
 			if (existing.some((m) => m.id === msg.id)) return;
 			cache[channel] = [...existing, msg];
 			persist();
+			notify();
 		},
 
 		removeMessage(channel: string, messageId: string): void {
@@ -62,6 +78,7 @@ export function createUndeliveredSync<T extends { id: string }>(
 				cache[channel] = filtered;
 			}
 			persist();
+			notify();
 		},
 
 		setChannelMessages(channel: string, messages: T[]): void {
@@ -71,16 +88,19 @@ export function createUndeliveredSync<T extends { id: string }>(
 				cache[channel] = messages;
 			}
 			persist();
+			notify();
 		},
 
 		clearChannel(channel: string): void {
 			delete cache[channel];
 			persist();
+			notify();
 		},
 
 		clearAll(): void {
 			cache = {};
 			storage.removeItem(storageKey).catch(() => {});
+			notify();
 		},
 	};
 }
