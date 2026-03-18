@@ -5,6 +5,7 @@ import {
 	WebSocketManager,
 } from "@luciodale/react-socket";
 import {
+	memo,
 	useCallback,
 	useEffect,
 	useMemo,
@@ -158,7 +159,7 @@ const STATUS_BADGE: Record<
 	retry: { label: "failed", color: "text-red-400" },
 };
 
-function MessageRow({
+const MessageRow = memo(function MessageRow({
 	msg,
 	isUndelivered,
 	onRetry,
@@ -189,7 +190,7 @@ function MessageRow({
 			</span>
 		</div>
 	);
-}
+});
 
 function Chat() {
 	const [input, setInput] = useState("");

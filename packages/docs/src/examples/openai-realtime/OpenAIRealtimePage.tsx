@@ -1,5 +1,5 @@
 import { useConnectionState, WebSocketManager } from "@luciodale/react-socket";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { create } from "zustand";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -145,7 +145,7 @@ function useChat() {
 
 // ── Components ───────────────────────────────────────────────────────
 
-function MessageBubble({ msg }: { msg: TMessage }) {
+const MessageBubble = memo(function MessageBubble({ msg }: { msg: TMessage }) {
 	const isUser = msg.role === "user";
 	return (
 		<div className={`mb-2 flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -161,7 +161,7 @@ function MessageBubble({ msg }: { msg: TMessage }) {
 			</div>
 		</div>
 	);
-}
+});
 
 function Chat() {
 	const [input, setInput] = useState("");
