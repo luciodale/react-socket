@@ -443,7 +443,7 @@ describe("WebSocketManager debug events", () => {
 		it("emits message-sent when ping interval fires", () => {
 			const pingMsg = { action: "ping", timestamp: "now" } as TTestClientMsg;
 			const { manager, transport, events } = createManager({
-				ping: pingMsg,
+				ping: () => pingMsg,
 				isPong: (msg) => msg.action === "pong",
 				pingIntervalMs: 100,
 			});

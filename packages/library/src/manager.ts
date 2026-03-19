@@ -26,7 +26,7 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 	private readonly reconnectBaseDelayMs: number;
 	private readonly reconnectMaxDelayMs: number;
 
-	private readonly ping: TClientMsg | undefined;
+	private readonly ping: (() => TClientMsg) | undefined;
 	private readonly isPong: ((msg: TServerMsg) => boolean) | undefined;
 
 	private readonly onMessageReceivedCb: TManagerConfig<
@@ -465,13 +465,14 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 
 		this.pingTimer = setInterval(() => {
 			if (this.ping) {
-				const raw = this.serialize(this.ping);
+				const msg = this.ping();
+				const raw = this.serialize(msg);
 				this.rawSend(raw);
 				this.emitDebug({
 					type: "message-sent",
 					ackId: undefined,
 					raw,
-					deserialized: this.ping,
+					deserialized: msg,
 				});
 			}
 			this.pongTimer = setTimeout(() => {

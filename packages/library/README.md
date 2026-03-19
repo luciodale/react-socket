@@ -41,7 +41,7 @@ const manager = new WebSocketManager<ClientMsg, ServerMsg>({
   deserialize: (raw) => JSON.parse(raw),
 
   // Ping / pong (keep-alive)
-  ping: { action: "ping" },              // message to send as ping
+  ping: () => ({ action: "ping" }),       // function returning the ping message
   isPong: (msg) => msg.type === "pong",   // detect pong responses
   pingIntervalMs: 30_000,                 // default: 30s
   pongTimeoutMs: 10_000,                  // default: 10s — disconnects if no pong

@@ -256,7 +256,7 @@ describe("WebSocketManager", () => {
 
 	describe("ping/pong", () => {
 		const pingConfig = {
-			ping: { action: "ping", timestamp: "now" } as TTestClientMsg,
+			ping: () => ({ action: "ping", timestamp: "now" }) as TTestClientMsg,
 			isPong: (msg: TTestServerMsg) => msg.action === "pong",
 		};
 

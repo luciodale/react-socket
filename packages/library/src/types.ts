@@ -31,7 +31,7 @@ export type TManagerConfig<TClientMsg, TServerMsg> = {
 	reconnectMaxAttempts?: number;
 	reconnectBaseDelayMs?: number;
 	reconnectMaxDelayMs?: number;
-	ping?: TClientMsg;
+	ping?: () => TClientMsg;
 	isPong?: (msg: TServerMsg) => boolean;
 	onMessageReceived?: (msg: TServerMsg) => void;
 	onSendIntent?: (params: TSendParams<TClientMsg>) => void;
