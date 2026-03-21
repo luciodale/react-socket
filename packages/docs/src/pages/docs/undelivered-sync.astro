@@ -3,6 +3,7 @@ import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
 import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
 import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
 import DocsPage from "../../layouts/DocsPage.astro";
+import { href } from "../../lib/link";
 
 export const prerender = true;
 ---
@@ -221,13 +222,13 @@ function useUndeliveredMessages(channel: string) {
 	<ContentSection label="Next Steps">
 		<ul class="space-y-2 text-white/60">
 			<li>
-				<a href="/docs/optimistic-updates" class="text-accent hover:underline">Optimistic Updates</a> — the in-flight tracking that feeds into undelivered sync
+				<a href={href("/docs/optimistic-updates")} class="text-accent hover:underline">Optimistic Updates</a> — the in-flight tracking that feeds into undelivered sync
 			</li>
 			<li>
-				<a href="/docs/reconnection" class="text-accent hover:underline">Reconnection</a> — when onReady fires and how to retry
+				<a href={href("/docs/reconnection")} class="text-accent hover:underline">Reconnection</a> — when onReady fires and how to retry
 			</li>
 			<li>
-				<a href="/docs/api" class="text-accent hover:underline">API Reference</a> — full method list
+				<a href={href("/docs/api")} class="text-accent hover:underline">API Reference</a> — full method list
 			</li>
 		</ul>
 	</ContentSection>

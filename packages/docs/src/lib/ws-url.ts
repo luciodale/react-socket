@@ -1,4 +1,4 @@
-const BASE_PATH = "/project/react-socket";
+const BASE_PATH = "/projects/react-socket";
 
 export function getWsUrl() {
 	if (import.meta.env.DEV) return "ws://localhost:3001/ws";

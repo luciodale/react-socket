@@ -3,6 +3,7 @@ import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
 import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
 import { InComponentEcho } from "../../components/demos/InComponentEcho";
 import DocsPage from "../../layouts/DocsPage.astro";
+import { href } from "../../lib/link";
 
 export const prerender = true;
 ---
@@ -73,11 +74,11 @@ function EchoDemo() {
 		/>
 		<p class="text-white/60 mt-4 leading-relaxed">
 			From here, you can layer in
-			<a href="/docs/subscriptions" class="text-accent hover:underline">subscriptions</a> for
+			<a href={href("/docs/subscriptions")} class="text-accent hover:underline">subscriptions</a> for
 			real-time data streams,
-			<a href="/docs/optimistic-updates" class="text-accent hover:underline">acknowledged sends</a> for
+			<a href={href("/docs/optimistic-updates")} class="text-accent hover:underline">acknowledged sends</a> for
 			delivery tracking, or move the manager out of the component into a shared module.
-			See the <a href="/demo/fire-and-forget" class="text-accent hover:underline">Fire and Forget</a>
+			See the <a href={href("/demo/fire-and-forget")} class="text-accent hover:underline">Fire and Forget</a>
 			example for a slightly richer version with input handling and message history.
 		</p>
 	</ContentSection>

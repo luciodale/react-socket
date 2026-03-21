@@ -2,6 +2,7 @@
 import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
 import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
 import DocsPage from "../../layouts/DocsPage.astro";
+import { href } from "../../lib/link";
 
 export const prerender = true;
 ---
@@ -16,7 +17,7 @@ export const prerender = true;
 	<ContentSection label="WebSocketManager">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			The core class. Takes two generic type parameters for your outgoing and incoming
-			message shapes. See <a href="/docs/configuration" class="text-accent hover:underline">Configuration</a> for
+			message shapes. See <a href={href("/docs/configuration")} class="text-accent hover:underline">Configuration</a> for
 			all constructor options.
 		</p>
 		<CodeBlock
@@ -70,14 +71,14 @@ manager.dispose();`}
 		<p class="text-white/60 mt-4 leading-relaxed">
 			When an <code class="text-accent font-mono text-sm">ackId</code> is provided and the send succeeds,
 			the message is tracked as in-flight.
-			See <a href="/docs/optimistic-updates" class="text-accent hover:underline">Optimistic Updates</a>.
+			See <a href={href("/docs/optimistic-updates")} class="text-accent hover:underline">Optimistic Updates</a>.
 		</p>
 	</ContentSection>
 
 	<ContentSection label="Subscriptions">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			Ref-counted subscription management.
-			See the <a href="/docs/subscriptions" class="text-accent hover:underline">Subscriptions</a> guide for a full walkthrough.
+			See the <a href={href("/docs/subscriptions")} class="text-accent hover:underline">Subscriptions</a> guide for a full walkthrough.
 		</p>
 		<CodeBlock
 			code={`// Subscribe to a channel. Sends a message on first subscriber.
@@ -109,7 +110,7 @@ manager.resolvePendingSubscription("chat:general");`}
 		<p class="text-white/60 mb-4 leading-relaxed">
 			Messages sent with an <code class="text-accent font-mono text-sm">ackId</code> are tracked until
 			acknowledged or dropped.
-			See <a href="/docs/optimistic-updates" class="text-accent hover:underline">Optimistic Updates</a>.
+			See <a href={href("/docs/optimistic-updates")} class="text-accent hover:underline">Optimistic Updates</a>.
 		</p>
 		<CodeBlock
 			code={`// Acknowledge a message (removes it from in-flight)
@@ -214,14 +215,14 @@ const storage = createLocalStorage();`}
 		/>
 		<p class="text-white/60 mt-4 leading-relaxed">
 			Used as input to <code class="text-accent font-mono text-sm">createUndeliveredSync</code>.
-			See <a href="/docs/undelivered-sync" class="text-accent hover:underline">Undelivered Sync</a>.
+			See <a href={href("/docs/undelivered-sync")} class="text-accent hover:underline">Undelivered Sync</a>.
 		</p>
 	</ContentSection>
 
 	<ContentSection label="createUndeliveredSync">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			Creates a persistent store for messages that haven't been delivered yet.
-			See the <a href="/docs/undelivered-sync" class="text-accent hover:underline">Undelivered Sync</a> guide
+			See the <a href={href("/docs/undelivered-sync")} class="text-accent hover:underline">Undelivered Sync</a> guide
 			for a full walkthrough.
 		</p>
 		<CodeBlock

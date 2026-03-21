@@ -3,6 +3,7 @@ import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
 import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
 import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
 import DocsPage from "../../layouts/DocsPage.astro";
+import { href } from "../../lib/link";
 
 export const prerender = true;
 ---
@@ -173,13 +174,13 @@ function ConnectionStatus() {
 	<ContentSection label="Next Steps">
 		<ul class="space-y-2 text-white/60">
 			<li>
-				<a href="/docs/subscriptions" class="text-accent hover:underline">Subscriptions</a> — how ref-counting works
+				<a href={href("/docs/subscriptions")} class="text-accent hover:underline">Subscriptions</a> — how ref-counting works
 			</li>
 			<li>
-				<a href="/docs/optimistic-updates" class="text-accent hover:underline">Optimistic Updates</a> — handling in-flight messages on disconnect
+				<a href={href("/docs/optimistic-updates")} class="text-accent hover:underline">Optimistic Updates</a> — handling in-flight messages on disconnect
 			</li>
 			<li>
-				<a href="/docs/configuration" class="text-accent hover:underline">Configuration</a> — all reconnection options
+				<a href={href("/docs/configuration")} class="text-accent hover:underline">Configuration</a> — all reconnection options
 			</li>
 		</ul>
 	</ContentSection>

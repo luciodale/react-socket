@@ -4,6 +4,7 @@ import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
 import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
 import PropsTable from "@luciodale/docs-ui-kit/components/PropsTable.astro";
 import DocsPage from "../../layouts/DocsPage.astro";
+import { href } from "../../lib/link";
 
 export const prerender = true;
 ---
@@ -100,7 +101,7 @@ export const prerender = true;
 		<p class="text-white/60 mb-4 leading-relaxed">
 			When a connection drops unexpectedly, the manager automatically reconnects
 			using exponential backoff with jitter. See the
-			<a href="/docs/reconnection" class="text-accent hover:underline">Reconnection</a> guide for the full picture.
+			<a href={href("/docs/reconnection")} class="text-accent hover:underline">Reconnection</a> guide for the full picture.
 		</p>
 		<CodeBlock
 			code={`{
@@ -218,13 +219,13 @@ const manager = new WebSocketManager<TClientMsg, TServerMsg>({
 	<ContentSection label="Next Steps">
 		<ul class="space-y-2 text-white/60">
 			<li>
-				<a href="/docs/api" class="text-accent hover:underline">API Reference</a> — every method and type
+				<a href={href("/docs/api")} class="text-accent hover:underline">API Reference</a> — every method and type
 			</li>
 			<li>
-				<a href="/docs/subscriptions" class="text-accent hover:underline">Subscriptions</a> — channels with automatic deduplication
+				<a href={href("/docs/subscriptions")} class="text-accent hover:underline">Subscriptions</a> — channels with automatic deduplication
 			</li>
 			<li>
-				<a href="/docs/optimistic-updates" class="text-accent hover:underline">Sending Messages</a> — fire-and-forget and acknowledged sends
+				<a href={href("/docs/optimistic-updates")} class="text-accent hover:underline">Sending Messages</a> — fire-and-forget and acknowledged sends
 			</li>
 		</ul>
 	</ContentSection>

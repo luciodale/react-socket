@@ -4,6 +4,7 @@ import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
 import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
 import PackageInfo from "@luciodale/docs-ui-kit/components/PackageInfo.astro";
 import DocsPage from "../../layouts/DocsPage.astro";
+import { href } from "../../lib/link";
 
 export const prerender = true;
 ---
@@ -355,24 +356,24 @@ type TServerMsg =
 		<ul class="space-y-2 text-white/60">
 			<li>
 				<a
-					href="/docs/configuration"
+					href={href("/docs/configuration")}
 					class="text-accent hover:underline">Configuration</a
 				> — all manager options in detail
 			</li>
 			<li>
 				<a
-					href="/docs/subscriptions"
+					href={href("/docs/subscriptions")}
 					class="text-accent hover:underline">Subscriptions</a
 				> — channels with automatic deduplication
 			</li>
 			<li>
 				<a
-					href="/docs/optimistic-updates"
+					href={href("/docs/optimistic-updates")}
 					class="text-accent hover:underline">Sending Messages</a
 				> — fire-and-forget and acknowledged sends
 			</li>
 			<li>
-				<a href="/docs/api" class="text-accent hover:underline"
+				<a href={href("/docs/api")} class="text-accent hover:underline"
 					>API Reference</a
 				> — every method and type
 			</li>

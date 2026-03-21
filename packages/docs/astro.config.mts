@@ -6,7 +6,7 @@ import { defineConfig } from "astro/config";
 
 export default defineConfig({
 	site: "https://koolcodez.com",
-	base: "/project/react-socket",
+	base: "/projects/react-socket",
 	output: "server",
 	adapter: cloudflare(),
 	integrations: [react(), sitemap()],
