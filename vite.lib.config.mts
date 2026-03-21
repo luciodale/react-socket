@@ -1,6 +1,7 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import dts from "vite-plugin-dts";
+import { viteStaticCopy } from "vite-plugin-static-copy";
 
 export default defineConfig({
 	plugins: [
@@ -14,6 +15,14 @@ export default defineConfig({
 				"packages/library/src/__tests__/**",
 			],
 			tsconfigPath: "packages/library/tsconfig.json",
+		}),
+		viteStaticCopy({
+			targets: [
+				{
+					src: "README.md",
+					dest: "../",
+				},
+			],
 		}),
 	],
 	build: {

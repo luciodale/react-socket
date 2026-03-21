@@ -48,4 +48,9 @@ export const siteConfig: SiteConfig = {
 		},
 	],
 	copyright: "Lucio D'Alessandro",
+	parentSite: {
+		href: "https://koolcodez.com/projects",
+		label: "koolcodez",
+		logoSrc: "/kool-codez-logo.svg",
+	},
 };
