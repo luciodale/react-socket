@@ -1,0 +1,88 @@
+---
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
+import { InspectorDemo } from "../../components/demos/InspectorDemo";
+import DocsPage from "../../layouts/DocsPage.astro";
+
+export const prerender = true;
+---
+
+<DocsPage title="Inspector" description="A built-in devtool panel that visualizes every WebSocket event, state snapshot, and diff in real time.">
+	<ContentSection label="Inspector">
+		<p class="text-white/60 mb-6 leading-relaxed">
+			react-socket ships with a built-in inspector panel you can drop into any
+			page during development. It captures every event the manager emits
+			(connects, disconnects, sends, receives, subscriptions, reconnect
+			attempts) and lets you step through state snapshots and diffs.
+		</p>
+		<p class="text-white/60 leading-relaxed">
+			The inspector renders as a draggable bubble in the corner of the screen.
+			Click it to expand the full panel with an event timeline, a JSON state
+			viewer, and a diff view that highlights what changed between any two
+			snapshots.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Live Demo">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Send a few messages below, then click the <strong class="text-white/80">WS</strong>
+			bubble in the bottom-right corner to open the inspector. You'll see every
+			event in the sidebar, the current manager state in the State tab, and the
+			delta between snapshots in the Diff tab.
+		</p>
+		<InspectorDemo client:load />
+	</ContentSection>
+
+	<ContentSection label="Usage">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Import <InlineCode>InspectorPanel</InlineCode> from the separate
+			<InlineCode>@luciodale/react-socket/inspector</InlineCode> entry point
+			and pass it your manager instance. That's all it takes:
+		</p>
+		<CodeBlock
+			code={`import { WebSocketManager } from "@luciodale/react-socket";
+import { InspectorPanel } from "@luciodale/react-socket/inspector";
+
+const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  url: "ws://localhost:3001/ws",
+  serialize: (msg) => JSON.stringify(msg),
+  deserialize: (raw) => JSON.parse(raw),
+  onMessageReceived(msg) {
+    // handle incoming messages
+  },
+});
+
+function App() {
+  return (
+    <div>
+      {/* your app */}
+      <InspectorPanel manager={manager} />
+    </div>
+  );
+}`}
+			language="tsx"
+			filename="App.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Options">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			<InlineCode>InspectorPanel</InlineCode> accepts two optional props:
+		</p>
+		<CodeBlock
+			code={`<InspectorPanel
+  manager={manager}
+  maxSnapshots={500}                // event history limit (default: 500)
+  defaultPosition="bottom-right"   // "top-left" | "top-right" | "bottom-left" | "bottom-right"
+/>`}
+			language="tsx"
+			filename="App.tsx"
+		/>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			The panel renders via a React portal into its own DOM node with scoped CSS,
+			so it won't interfere with your app's styles. Strip it from production
+			builds with a simple conditional or your bundler's dead-code elimination.
+		</p>
+	</ContentSection>
+</DocsPage>

@@ -44,6 +44,7 @@ export const siteConfig: SiteConfig = {
 				{ href: "/demo/fire-and-forget", label: "Fire and Forget" },
 				{ href: "/demo/chat-room", label: "Chat Room" },
 				{ href: "/demo/undelivered-sync", label: "Undelivered Sync" },
+				{ href: "/demo/inspector", label: "Inspector" },
 			],
 		},
 	],

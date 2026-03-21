@@ -8,12 +8,12 @@ import DocsPage from "../../layouts/DocsPage.astro";
 export const prerender = true;
 ---
 
-<DocsPage title="Undelivered Sync" description="Demonstrates message persistence: send messages, disconnect, and watch them retry automatically.">
+<DocsPage title="Undelivered Sync" description="Demonstrates message persistence: send messages, disconnect, and retry them manually when ready.">
 	<ContentSection label="Undelivered Sync">
 		<p class="text-white/60 mb-6 leading-relaxed">
 			This demo shows what happens when you send messages while disconnected.
-			Messages are saved to localStorage and automatically retried when the
-			connection comes back. Watch the status labels to see the full lifecycle.
+			Messages are saved to localStorage and marked as failed. You decide when
+			to retry them by clicking the retry button next to each message.
 		</p>
 	</ContentSection>
 
@@ -21,8 +21,8 @@ export const prerender = true;
 		<p class="text-white/60 mb-4 leading-relaxed">
 			Hit <strong class="text-white/80">Disconnect</strong>, send a few messages (they'll
 			be saved immediately), then hit <strong class="text-white/80">Reconnect</strong>.
-			The messages move through:
-			<InlineCode>saved for retry</InlineCode> &rarr;
+			Failed messages show a retry button. Click it to resend:
+			<InlineCode>failed</InlineCode> &rarr;
 			<InlineCode>retrying</InlineCode> &rarr;
 			<InlineCode>delivered</InlineCode>.
 		</p>
@@ -92,24 +92,26 @@ function handleSend(channel: string, text: string) {
 		/>
 	</ContentSection>
 
-	<ContentSection label="Retrying on Reconnect">
+	<ContentSection label="Manual Retry">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			The <InlineCode>onReady</InlineCode> callback fires after a
-			reconnect, once subscriptions have been restored. This is the right place
-			to retry any saved messages:
+			Failed messages stay visible with a retry button. When the user clicks it,
+			you resend the message through the manager. If the connection is back up,
+			the message transitions through
+			<InlineCode>retrying</InlineCode> &rarr;
+			<InlineCode>delivered</InlineCode>:
 		</p>
 		<CodeBlock
-			code={`onReady() {
-  const saved = undelivered.getChannelMessages("demo");
-  for (const msg of saved) {
-    manager.send({
-      data: { action: "message", id: msg.id, channel: "demo", text: msg.text },
-      ackId: msg.id,
-    });
+			code={`function handleRetry(id: string, text: string) {
+  const sent = manager.send({
+    data: { action: "message", id, channel: "demo", text },
+    ackId: id,
+  });
+  if (!sent) {
+    // Still disconnected, keep it as failed
   }
 }
 
-// When the server finally confirms, clean up:
+// When the server confirms, clean up:
 onMessageReceived(msg) {
   if (msg.action === "message") {
     manager.ackInFlight(msg.id);

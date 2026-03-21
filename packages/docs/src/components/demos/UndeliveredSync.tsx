@@ -26,7 +26,7 @@ type TServerMsg =
 
 type TStoredMessage = { id: string; channel: string; text: string };
 
-type TStatus = "sending" | "delivered" | "saved" | "retrying";
+type TStatus = "sending" | "delivered" | "failed" | "retrying";
 
 type TUIMessage = {
 	id: string;
@@ -124,24 +124,9 @@ const manager = new WebSocketManager<TClientMsg, TServerMsg>({
 		const droppedIds = new Set(messages.map((m) => m.id));
 		useStore.setState((s) => ({
 			messages: s.messages.map((m) =>
-				droppedIds.has(m.id) ? { ...m, status: "saved" as const } : m,
+				droppedIds.has(m.id) ? { ...m, status: "failed" as const } : m,
 			),
 		}));
-	},
-
-	onReady() {
-		const saved = undelivered.getChannelMessages(CHANNEL);
-		for (const msg of saved) {
-			manager.send({
-				data: {
-					action: "message",
-					id: msg.id,
-					channel: CHANNEL,
-					text: msg.text,
-				},
-				ackId: msg.id,
-			});
-		}
 	},
 });
 
@@ -150,14 +135,14 @@ const manager = new WebSocketManager<TClientMsg, TServerMsg>({
 const STATUS_LABEL: Record<TStatus, string> = {
 	sending: "sending...",
 	delivered: "delivered",
-	saved: "saved for retry",
+	failed: "failed",
 	retrying: "retrying...",
 };
 
 const STATUS_COLOR: Record<TStatus, string> = {
 	sending: "text-yellow-400/60",
 	delivered: "text-green-400/60",
-	saved: "text-orange-400/60",
+	failed: "text-red-400/60",
 	retrying: "text-blue-400/60",
 };
 
@@ -169,7 +154,27 @@ export function UndeliveredSync() {
 	const state = useConnectionState(manager);
 
 	useEffect(() => {
-		undelivered.init().then(() => manager.connect());
+		undelivered.init().then(() => {
+			const saved = undelivered.getChannelMessages(CHANNEL);
+			for (const msg of saved) {
+				useStore.setState((s) => {
+					const exists = s.messages.some((m) => m.id === msg.id);
+					if (exists) return s;
+					return {
+						messages: [
+							...s.messages,
+							{
+								id: msg.id,
+								sender: "you",
+								text: msg.text,
+								status: "failed" as const,
+							},
+						],
+					};
+				});
+			}
+			manager.connect();
+		});
 		return () => manager.disconnect();
 	}, []);
 
@@ -185,7 +190,7 @@ export function UndeliveredSync() {
 			undelivered.addMessage(CHANNEL, { id, channel: CHANNEL, text });
 			useStore.setState((s) => ({
 				messages: s.messages.map((m) =>
-					m.id === id ? { ...m, status: "saved" as const } : m,
+					m.id === id ? { ...m, status: "failed" as const } : m,
 				),
 			}));
 		}
@@ -200,8 +205,22 @@ export function UndeliveredSync() {
 		manager.connect();
 	}
 
+	function handleRetry(id: string, text: string) {
+		const sent = manager.send({
+			data: { action: "message", id, channel: CHANNEL, text },
+			ackId: id,
+		});
+		if (!sent) {
+			useStore.setState((s) => ({
+				messages: s.messages.map((m) =>
+					m.id === id ? { ...m, status: "failed" as const } : m,
+				),
+			}));
+		}
+	}
+
 	const inFlight = messages.filter((m) => m.status === "sending").length;
-	const saved = messages.filter((m) => m.status === "saved").length;
+	const failed = messages.filter((m) => m.status === "failed").length;
 
 	return (
 		<div className="space-y-4">
@@ -229,15 +248,13 @@ export function UndeliveredSync() {
 					</div>
 				</div>
 
-				{(inFlight > 0 || saved > 0) && (
+				{(inFlight > 0 || failed > 0) && (
 					<div className="mb-3 flex gap-4 text-xs">
 						{inFlight > 0 && (
 							<span className="text-yellow-400/60">{inFlight} in flight</span>
 						)}
-						{saved > 0 && (
-							<span className="text-orange-400/60">
-								{saved} saved for retry
-							</span>
+						{failed > 0 && (
+							<span className="text-red-400/60">{failed} failed</span>
 						)}
 					</div>
 				)}
@@ -245,8 +262,8 @@ export function UndeliveredSync() {
 				<div className="mb-3 min-h-[120px] max-h-[240px] overflow-y-auto rounded bg-black/40 p-3">
 					{messages.length === 0 && (
 						<p className="text-sm text-white/30">
-							Send a message, disconnect, then reconnect to see persistence
-							in action.
+							Send a message, disconnect, then reconnect to see persistence in
+							action.
 						</p>
 					)}
 					{messages.map((m) => (
@@ -258,6 +275,15 @@ export function UndeliveredSync() {
 							<span className={`text-xs ${STATUS_COLOR[m.status]}`}>
 								{STATUS_LABEL[m.status]}
 							</span>
+							{m.status === "failed" && (
+								<button
+									type="button"
+									onClick={() => handleRetry(m.id, m.text)}
+									className="text-xs text-accent hover:underline cursor-pointer"
+								>
+									retry
+								</button>
+							)}
 						</div>
 					))}
 				</div>
