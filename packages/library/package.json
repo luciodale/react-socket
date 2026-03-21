@@ -7,6 +7,10 @@
 		"url": "https://github.com/luciodale/react-socket"
 	},
 	"module": "dist/react-socket.es.js",
+	"peerDependencies": {
+		"react": ">=16 || >=17 || >=18 || >=19",
+		"react-dom": ">=16 || >=17 || >=18 || >=19"
+	},
 	"exports": {
 		".": {
 			"types": "./dist/index.d.ts",
@@ -16,10 +20,6 @@
 			"types": "./dist/inspector/index.d.ts",
 			"import": "./dist/react-socket-inspector.es.js"
 		}
-	},
-	"peerDependencies": {
-		"react": ">=16 || >=17 || >=18 || >=19",
-		"react-dom": ">=16 || >=17 || >=18 || >=19"
 	},
 	"description": "Lightweight WebSocket manager for React with reconnection, subscriptions, and in-flight tracking.",
 	"files": [

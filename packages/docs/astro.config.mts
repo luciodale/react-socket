@@ -4,6 +4,8 @@ import sitemap from "@astrojs/sitemap";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "astro/config";
 
+const isBuild = process.argv.includes("build");
+
 export default defineConfig({
 	site: "https://koolcodez.com",
 	base: "/projects/react-socket",
@@ -12,10 +14,8 @@ export default defineConfig({
 	integrations: [react(), sitemap()],
 	vite: {
 		plugins: [tailwindcss()],
-		resolve: {
-			alias: {
-				"react-dom/server": "react-dom/server.edge",
-			},
-		},
+		resolve: isBuild
+			? { alias: { "react-dom/server": "react-dom/server.edge" } }
+			: {},
 	},
 });

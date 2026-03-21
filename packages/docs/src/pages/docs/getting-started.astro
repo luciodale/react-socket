@@ -18,12 +18,13 @@ export const prerender = true;
 	<ContentSection label="What is react-socket?">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			WebSockets look easy until you actually build with them. The initial
-			<InlineCode>new WebSocket(url)</InlineCode> takes five minutes. Then you spend the next week wiring up reconnection
-			logic, figuring out why your subscriptions vanish after a dropped connection,
-			deduplicating messages when three components all subscribe to the same
-			channel, and tracking which sends actually made it to the server. All
-			of this ends up scattered across hooks, effects, and refs until the whole
-			thing becomes a maintenance problem.
+			<InlineCode>new WebSocket(url)</InlineCode> takes five minutes. Then you
+			spend the next week wiring up reconnection logic, figuring out why your
+			subscriptions vanish after a dropped connection, deduplicating messages
+			when three components all subscribe to the same channel, and tracking
+			which sends actually made it to the server. All of this ends up scattered
+			across hooks, effects, and refs until the whole thing becomes a maintenance
+			problem.
 		</p>
 		<p class="text-white/60 leading-relaxed">
 			react-socket takes that entire layer off your plate. You define your
@@ -56,13 +57,40 @@ export const prerender = true;
 		<p class="text-white/60 mb-4 leading-relaxed">
 			Here's what you get for free:
 		</p>
-		<FeatureList features={[
-			{ highlight: "Automatic reconnection", description: "exponential backoff with jitter. Subscriptions are restored transparently after every reconnect", color: "accent" },
-			{ highlight: "Subscription deduplication", description: "ten components can subscribe to the same channel and only one message goes to the server. The library ref-counts internally. When the last component unmounts, the unsubscribe fires automatically", color: "blue" },
-			{ highlight: "In-flight message tracking", description: "send a message with an ack ID, track it as pending, and know exactly when the server confirmed it or when it was dropped", color: "green" },
-			{ highlight: "Keep-alive pings", description: "proxies and load balancers won't kill idle connections", color: "purple" },
-			{ highlight: "First-class TypeScript", description: "your client and server message types flow through every callback, every send(), every received message. Protocol mismatches are caught at compile time, not in production", color: "yellow" },
-		]} />
+		<FeatureList
+			features={[
+				{
+					highlight: "Automatic reconnection",
+					description:
+						"exponential backoff with jitter. Subscriptions are restored transparently after every reconnect",
+					color: "accent",
+				},
+				{
+					highlight: "Subscription deduplication",
+					description:
+						"ten components can subscribe to the same channel and only one message goes to the server. The library ref-counts internally. When the last component unmounts, the unsubscribe fires automatically",
+					color: "blue",
+				},
+				{
+					highlight: "In-flight message tracking",
+					description:
+						"send a message with an ack ID, track it as pending, and know exactly when the server confirmed it or when it was dropped",
+					color: "green",
+				},
+				{
+					highlight: "Keep-alive pings",
+					description:
+						"proxies and load balancers won't kill idle connections",
+					color: "purple",
+				},
+				{
+					highlight: "First-class TypeScript",
+					description:
+						"your client and server message types flow through every callback, every send(), every received message. Protocol mismatches are caught at compile time, not in production",
+					color: "yellow",
+				},
+			]}
+		/>
 		<p class="text-white/60 leading-relaxed">
 			And here's what you stay in control of: your message format, your
 			state management, your routing logic, your UI. react-socket doesn't
@@ -87,10 +115,9 @@ export const prerender = true;
 	<ContentSection label="Quick Start">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			The simplest way to use react-socket. Create a manager in a
-			<InlineCode>useMemo</InlineCode>, store
-			the response in
-			<InlineCode>useState</InlineCode>, fire a
-			message, done. Everything lives in a single component:
+			<InlineCode>useMemo</InlineCode>, store the response in
+			<InlineCode>useState</InlineCode>, fire a message, done. Everything
+			lives in a single component:
 		</p>
 		<CodeBlock
 			code={`import { useMemo, useState } from "react";
@@ -133,14 +160,15 @@ function EchoDemo() {
 			serialization, and message routing. You define what to send and what
 			to do when something comes back. Notice how
 			<InlineCode>TClientMsg</InlineCode> and
-			<InlineCode>TServerMsg</InlineCode> are fully
-			typed: if you change a field name or add a new message variant, TypeScript
-			tells you everywhere that needs updating.
+			<InlineCode>TServerMsg</InlineCode> are fully typed: if you change a field
+			name or add a new message variant, TypeScript tells you everywhere that
+			needs updating.
 		</p>
 		<Callout type="tip" title="Lifecycle">
-			In a real app, call <InlineCode>manager.connect()</InlineCode> inside a <InlineCode>useEffect</InlineCode>
-			and return <InlineCode>manager.disconnect()</InlineCode> as cleanup. The quick start
-			above inlines it in <InlineCode>useMemo</InlineCode> for brevity.
+			In a real app, call <InlineCode>manager.connect()</InlineCode> inside
+			a <InlineCode>useEffect</InlineCode>
+			and return <InlineCode>manager.disconnect()</InlineCode> as cleanup. The
+			quick start above inlines it in <InlineCode>useMemo</InlineCode> for brevity.
 		</Callout>
 	</ContentSection>
 
@@ -151,7 +179,9 @@ function EchoDemo() {
 			server pushes data back over time. The powerful part: if five
 			components subscribe to the same channel, only one message goes to
 			the server. The library ref-counts internally and all components
-			read from the same store, updated by a single <InlineCode>onMessageReceived</InlineCode> callback.
+			read from the same store, updated by a single <InlineCode
+				>onMessageReceived</InlineCode
+			> callback.
 		</p>
 		<CodeBlock
 			code={`import { useEffect } from "react";
@@ -206,9 +236,10 @@ manager.send({ data: { action: "cursor_move", x: 100, y: 200 } });`}
 		/>
 		<p class="text-white/60 mb-4 mt-4 leading-relaxed">
 			<strong class="text-white/80">Acknowledged sends</strong> are for when
-			delivery matters. You include an <InlineCode>ackId</InlineCode> and the library tracks the message as "in-flight" until the server echoes
-			it back. The key: the server must include the same ID in its response
-			so the library can match the confirmation to the original send.
+			delivery matters. You include an <InlineCode>ackId</InlineCode> and the
+			library tracks the message as "in-flight" until the server echoes it back.
+			The key: the server must include the same ID in its response so the library
+			can match the confirmation to the original send.
 		</p>
 		<CodeBlock
 			code={`// Acknowledged send: track until the server confirms
@@ -229,14 +260,13 @@ onMessageReceived(msg) {
 			filename="acknowledged-send.ts"
 		/>
 		<p class="text-white/60 mt-4 leading-relaxed">
-			The <InlineCode>onSendIntent</InlineCode> callback
-			fires on every
-			<InlineCode>send()</InlineCode>, even when
-			offline. This is where you do optimistic UI updates: add the message
-			to your store immediately, then confirm or roll back when the server
-			responds. If the connection drops while messages are in-flight,
-			<InlineCode>onInFlightDrop</InlineCode> fires
-			so you can mark them as failed or save them for retry.
+			The <InlineCode>onSendIntent</InlineCode> callback fires on every
+			<InlineCode>send()</InlineCode>, even when offline. This is where
+			you do optimistic UI updates: add the message to your store
+			immediately, then confirm or roll back when the server responds. If
+			the connection drops while messages are in-flight,
+			<InlineCode>onInFlightDrop</InlineCode> fires so you can mark them as
+			failed or save them for retry.
 		</p>
 	</ContentSection>
 
@@ -290,12 +320,11 @@ onMessageReceived(msg) {
 		<p class="text-white/60 mb-4 leading-relaxed">
 			This is not TypeScript as an afterthought. Your
 			<InlineCode>TClientMsg</InlineCode> and
-			<InlineCode>TServerMsg</InlineCode> types are
-			the single source of truth for your entire WebSocket protocol. They flow
-			through the constructor, every callback, <InlineCode>send()</InlineCode>,
+			<InlineCode>TServerMsg</InlineCode> types are the single source of truth
+			for your entire WebSocket protocol. They flow through the constructor,
+			every callback, <InlineCode>send()</InlineCode>,
 			<InlineCode>serialize</InlineCode>,
-			<InlineCode>deserialize</InlineCode>, and
-			subscription payloads.
+			<InlineCode>deserialize</InlineCode>, and subscription payloads.
 		</p>
 		<CodeBlock
 			code={`// These union types define your protocol.
