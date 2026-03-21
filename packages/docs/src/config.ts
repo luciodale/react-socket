@@ -7,6 +7,7 @@ export const siteConfig: SiteConfig = {
 	siteUrl: "https://react-socket-docs.pages.dev",
 	logoSrc: "/logo.svg",
 	logoAlt: "react-socket logo",
+	ogImage: "/og-image.png",
 	installCommand: "npm install @luciodale/react-socket",
 	githubUrl: "https://github.com/luciodale/react-socket",
 	author: "Lucio D'Alessandro",
