@@ -2,6 +2,7 @@
 import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
 import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
 import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
 import DocsPage from "../../layouts/DocsPage.astro";
 import { href } from "../../lib/link";
 
@@ -13,7 +14,7 @@ export const prerender = true;
 		<p class="text-white/60 mb-6 leading-relaxed">
 			When messages fail to deliver (e.g. the connection drops mid-send), you can
 			persist them to storage and retry later. The
-			<code class="text-accent font-mono text-sm">createUndeliveredSync</code> utility handles
+			<InlineCode>createUndeliveredSync</InlineCode> utility handles
 			this with a channel-based store backed by any async storage.
 		</p>
 	</ContentSection>
@@ -30,17 +31,17 @@ export const prerender = true;
 		</p>
 		<ol class="list-decimal list-inside space-y-2 text-white/60 mb-4">
 			<li>User sends a message while online — it enters the in-flight map</li>
-			<li>Connection drops before the server confirms — <code class="text-accent font-mono text-sm">onInFlightDrop</code> fires</li>
+			<li>Connection drops before the server confirms — <InlineCode>onInFlightDrop</InlineCode> fires</li>
 			<li>Save the dropped messages to the undelivered store</li>
-			<li>On reconnect, <code class="text-accent font-mono text-sm">onReady</code> retries them</li>
+			<li>On reconnect, <InlineCode>onReady</InlineCode> retries them</li>
 		</ol>
 		<p class="text-white/60 mb-2 leading-relaxed">
 			<strong class="text-white/80">User sends while already disconnected:</strong>
 		</p>
 		<ol class="list-decimal list-inside space-y-2 text-white/60">
-			<li><code class="text-accent font-mono text-sm">send()</code> returns <code class="text-accent font-mono text-sm">false</code> — the message never enters the in-flight map</li>
+			<li><InlineCode>send()</InlineCode> returns <InlineCode>false</InlineCode> — the message never enters the in-flight map</li>
 			<li>Save it to the undelivered store immediately</li>
-			<li>On reconnect, <code class="text-accent font-mono text-sm">onReady</code> picks it up and retries</li>
+			<li>On reconnect, <InlineCode>onReady</InlineCode> picks it up and retries</li>
 		</ol>
 	</ContentSection>
 
@@ -68,23 +69,23 @@ await undelivered.init();`}
 			filename="undelivered.ts"
 		/>
 		<Callout type="warning" title="Initialize First">
-			You must call <code>init()</code> before using any other method. It loads
+			You must call <InlineCode>init()</InlineCode> before using any other method. It loads
 			previously saved messages from storage. Connect the manager only after
-			<code>init()</code> resolves.
+			<InlineCode>init()</InlineCode> resolves.
 		</Callout>
 		<Callout type="tip" title="Built-in Deduplication">
-			The generic type must have an <code>id: string</code> field. Calling
-			<code>addMessage</code> with an existing ID is a no-op, so you never
+			The generic type must have an <InlineCode>id: string</InlineCode> field. Calling
+			<InlineCode>addMessage</InlineCode> with an existing ID is a no-op, so you never
 			get duplicate entries.
 		</Callout>
 	</ContentSection>
 
 	<ContentSection label="Storage Interface">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			<code class="text-accent font-mono text-sm">createLocalStorage()</code> wraps
-			<code class="text-accent font-mono text-sm">window.localStorage</code> with error handling.
+			<InlineCode>createLocalStorage()</InlineCode> wraps
+			<InlineCode>window.localStorage</InlineCode> with error handling.
 			You can provide any storage that implements
-			<code class="text-accent font-mono text-sm">IStorage</code>:
+			<InlineCode>IStorage</InlineCode>:
 		</p>
 		<CodeBlock
 			code={`import type { IStorage } from "@luciodale/react-socket";
@@ -141,9 +142,9 @@ const unsub = undelivered.subscribe(() => {
 	<ContentSection label="Integration with the Manager">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			Wire the undelivered store into the manager's callbacks. There are two
-			save paths: <code class="text-accent font-mono text-sm">onInFlightDrop</code> for
+			save paths: <InlineCode>onInFlightDrop</InlineCode> for
 			messages dropped on disconnect, and a check on
-			<code class="text-accent font-mono text-sm">send()</code>'s return value for messages
+			<InlineCode>send()</InlineCode>'s return value for messages
 			sent while already offline:
 		</p>
 		<CodeBlock
@@ -202,7 +203,7 @@ function sendMessage(channel: string, text: string) {
 
 	<ContentSection label="Reactivity">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Use the <code class="text-accent font-mono text-sm">subscribe</code> method to react to changes.
+			Use the <InlineCode>subscribe</InlineCode> method to react to changes.
 			With Zustand, you can expose undelivered messages as part of your store:
 		</p>
 		<CodeBlock

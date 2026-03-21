@@ -1,6 +1,7 @@
 ---
 import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
 import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
 import DocsPage from "../../layouts/DocsPage.astro";
 import { href } from "../../lib/link";
 
@@ -10,7 +11,7 @@ export const prerender = true;
 <DocsPage title="API Reference">
 	<ContentSection label="API Reference">
 		<p class="text-white/60 mb-6 leading-relaxed">
-			Complete reference for all exports from <code class="text-accent font-mono text-sm">@luciodale/react-socket</code>.
+			Complete reference for all exports from <InlineCode>@luciodale/react-socket</InlineCode>.
 		</p>
 	</ContentSection>
 
@@ -51,8 +52,8 @@ manager.dispose();`}
 
 	<ContentSection label="send()">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Send a message to the server. Returns <code class="text-accent font-mono text-sm">false</code> if
-			not connected. The <code class="text-accent font-mono text-sm">onSendIntent</code> callback fires
+			Send a message to the server. Returns <InlineCode>false</InlineCode> if
+			not connected. The <InlineCode>onSendIntent</InlineCode> callback fires
 			regardless of connection state.
 		</p>
 		<CodeBlock
@@ -69,7 +70,7 @@ manager.dispose();`}
 			filename="send.ts"
 		/>
 		<p class="text-white/60 mt-4 leading-relaxed">
-			When an <code class="text-accent font-mono text-sm">ackId</code> is provided and the send succeeds,
+			When an <InlineCode>ackId</InlineCode> is provided and the send succeeds,
 			the message is tracked as in-flight.
 			See <a href={href("/docs/optimistic-updates")} class="text-accent hover:underline">Optimistic Updates</a>.
 		</p>
@@ -108,7 +109,7 @@ manager.resolvePendingSubscription("chat:general");`}
 
 	<ContentSection label="In-Flight Tracking">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Messages sent with an <code class="text-accent font-mono text-sm">ackId</code> are tracked until
+			Messages sent with an <InlineCode>ackId</InlineCode> are tracked until
 			acknowledged or dropped.
 			See <a href={href("/docs/optimistic-updates")} class="text-accent hover:underline">Optimistic Updates</a>.
 		</p>
@@ -171,7 +172,7 @@ unsubDebug();`}
 	<ContentSection label="Protocols">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			Add WebSocket sub-protocols before connecting. These are passed as the second
-			argument to the underlying <code class="text-accent font-mono text-sm">WebSocket</code> constructor.
+			argument to the underlying <InlineCode>WebSocket</InlineCode> constructor.
 		</p>
 		<CodeBlock
 			code={`manager.addProtocols(["graphql-ws"]);
@@ -184,7 +185,7 @@ manager.connect();`}
 	<ContentSection label="useConnectionState">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			A React hook that returns the current connection state. Built on
-			<code class="text-accent font-mono text-sm">useSyncExternalStore</code> so it is safe for
+			<InlineCode>useSyncExternalStore</InlineCode> so it is safe for
 			concurrent rendering.
 		</p>
 		<CodeBlock
@@ -202,8 +203,8 @@ function StatusBadge() {
 
 	<ContentSection label="createLocalStorage">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			A helper that wraps <code class="text-accent font-mono text-sm">window.localStorage</code> behind the
-			async <code class="text-accent font-mono text-sm">IStorage</code> interface. All operations are
+			A helper that wraps <InlineCode>window.localStorage</InlineCode> behind the
+			async <InlineCode>IStorage</InlineCode> interface. All operations are
 			wrapped in try/catch so they fail silently when storage is unavailable.
 		</p>
 		<CodeBlock
@@ -214,7 +215,7 @@ const storage = createLocalStorage();`}
 			filename="storage.ts"
 		/>
 		<p class="text-white/60 mt-4 leading-relaxed">
-			Used as input to <code class="text-accent font-mono text-sm">createUndeliveredSync</code>.
+			Used as input to <InlineCode>createUndeliveredSync</InlineCode>.
 			See <a href={href("/docs/undelivered-sync")} class="text-accent hover:underline">Undelivered Sync</a>.
 		</p>
 	</ContentSection>
@@ -277,9 +278,9 @@ await undelivered.init();`}
 
 	<ContentSection label="Debug Event Types">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Every debug event has an <code class="text-accent font-mono text-sm">id</code>,
-			<code class="text-accent font-mono text-sm">timestamp</code>, and a
-			<code class="text-accent font-mono text-sm">type</code> discriminator. Here are all possible types:
+			Every debug event has an <InlineCode>id</InlineCode>,
+			<InlineCode>timestamp</InlineCode>, and a
+			<InlineCode>type</InlineCode> discriminator. Here are all possible types:
 		</p>
 		<CodeBlock
 			code={`| Type                          | Payload                              |

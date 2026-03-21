@@ -2,6 +2,7 @@
 import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
 import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
 import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
 import PropsTable from "@luciodale/docs-ui-kit/components/PropsTable.astro";
 import DocsPage from "../../layouts/DocsPage.astro";
 import { href } from "../../lib/link";
@@ -60,8 +61,8 @@ export const prerender = true;
 			filename="manager.ts"
 		/>
 		<p class="text-white/60 mt-4 leading-relaxed">
-			The <code class="text-accent font-mono text-sm">serialize</code> and
-			<code class="text-accent font-mono text-sm">deserialize</code> functions are typed against
+			The <InlineCode>serialize</InlineCode> and
+			<InlineCode>deserialize</InlineCode> functions are typed against
 			your generics, so TypeScript ensures you're producing and consuming the right shapes.
 			You can use JSON, MessagePack, Protobuf — whatever your server speaks.
 		</p>
@@ -70,7 +71,7 @@ export const prerender = true;
 	<ContentSection label="Ping / Pong">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			Keep-alive pings prevent idle connections from being dropped by proxies
-			or load balancers. The <code class="text-accent font-mono text-sm">ping</code> option is
+			or load balancers. The <InlineCode>ping</InlineCode> option is
 			a function, so you can include dynamic values like timestamps:
 		</p>
 		<CodeBlock
@@ -91,8 +92,8 @@ export const prerender = true;
 			filename="manager.ts"
 		/>
 		<Callout type="info">
-			If <code>isPong</code> is provided and the server doesn't respond within
-			<code>pongTimeoutMs</code>, the connection is closed and reconnection begins
+			If <InlineCode>isPong</InlineCode> is provided and the server doesn't respond within
+			<InlineCode>pongTimeoutMs</InlineCode>, the connection is closed and reconnection begins
 			automatically.
 		</Callout>
 	</ContentSection>
@@ -186,9 +187,9 @@ export const prerender = true;
 
 	<ContentSection label="Custom Transport">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			By default the manager uses the browser's native <code class="text-accent font-mono text-sm">WebSocket</code>.
+			By default the manager uses the browser's native <InlineCode>WebSocket</InlineCode>.
 			You can provide a custom transport that implements
-			<code class="text-accent font-mono text-sm">IWebSocketTransport</code> — useful for
+			<InlineCode>IWebSocketTransport</InlineCode> — useful for
 			testing or non-browser environments:
 		</p>
 		<CodeBlock

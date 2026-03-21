@@ -2,6 +2,8 @@
 import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
 import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
 import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import FeatureList from "@luciodale/docs-ui-kit/components/FeatureList.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
 import DocsPage from "../../layouts/DocsPage.astro";
 import { href } from "../../lib/link";
 
@@ -22,15 +24,15 @@ export const prerender = true;
 			On an unexpected close (any code other than 1000), the manager:
 		</p>
 		<ol class="list-decimal list-inside space-y-2 text-white/60 mb-4">
-			<li>Sets the state to <code class="text-accent font-mono text-sm">"reconnecting"</code></li>
-			<li>Drops any in-flight messages and fires <code class="text-accent font-mono text-sm">onInFlightDrop</code></li>
+			<li>Sets the state to <InlineCode>"reconnecting"</InlineCode></li>
+			<li>Drops any in-flight messages and fires <InlineCode>onInFlightDrop</InlineCode></li>
 			<li>Waits using exponential backoff with jitter</li>
 			<li>Opens a new connection</li>
 			<li>Re-sends all active subscriptions</li>
-			<li>Fires <code class="text-accent font-mono text-sm">onReady</code></li>
+			<li>Fires <InlineCode>onReady</InlineCode></li>
 		</ol>
 		<p class="text-white/60 leading-relaxed">
-			If <code class="text-accent font-mono text-sm">disconnect()</code> was called, or the server
+			If <InlineCode>disconnect()</InlineCode> was called, or the server
 			closed with code 1000 (normal close), no reconnection is attempted.
 		</p>
 	</ContentSection>
@@ -76,29 +78,23 @@ export const prerender = true;
 		/>
 		<Callout type="warning">
 			After exhausting all attempts, the state moves to
-			<code>"disconnected"</code> and no further retries are made.
-			Call <code>connect()</code> or <code>forceReconnect()</code> to try again manually.
+			<InlineCode>"disconnected"</InlineCode> and no further retries are made.
+			Call <InlineCode>connect()</InlineCode> or <InlineCode>forceReconnect()</InlineCode> to try again manually.
 		</Callout>
 	</ContentSection>
 
 	<ContentSection label="Online / Offline Detection">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			The manager listens to the browser's
-			<code class="text-accent font-mono text-sm">online</code> and
-			<code class="text-accent font-mono text-sm">offline</code> events:
+			<InlineCode>online</InlineCode> and
+			<InlineCode>offline</InlineCode> events:
 		</p>
-		<ul class="list-disc list-inside space-y-2 text-white/60">
-			<li>
-				<strong class="text-white/80">Offline</strong> — the connection is immediately closed and
-				the state moves to <code class="text-accent font-mono text-sm">"reconnecting"</code>
-			</li>
-			<li>
-				<strong class="text-white/80">Online</strong> — the reconnect attempt counter resets to zero
-				and a new connection attempt starts immediately (no backoff delay)
-			</li>
-		</ul>
+		<FeatureList features={[
+			{ highlight: "Offline", description: "the connection is immediately closed and the state moves to \"reconnecting\"", color: "yellow" },
+			{ highlight: "Online", description: "the reconnect attempt counter resets to zero and a new connection attempt starts immediately (no backoff delay)", color: "blue" },
+		]} />
 		<Callout type="tip" title="Instant Recovery">
-			When the browser fires the <code>online</code> event, the reconnect counter
+			When the browser fires the <InlineCode>online</InlineCode> event, the reconnect counter
 			resets to zero and a connection attempt starts immediately with no backoff delay.
 		</Callout>
 	</ContentSection>
@@ -116,19 +112,19 @@ export const prerender = true;
 		<p class="text-white/60 mt-4 leading-relaxed">
 			This drops all in-flight messages, clears pending subscriptions, closes
 			the current connection, resets the attempt counter to zero, and immediately
-			calls <code class="text-accent font-mono text-sm">connect()</code>.
+			calls <InlineCode>connect()</InlineCode>.
 		</p>
 	</ContentSection>
 
 	<ContentSection label="Subscription Restoration">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			After reconnecting, the manager re-sends all active subscriptions using the
-			<code class="text-accent font-mono text-sm">data</code> payload you passed to
-			<code class="text-accent font-mono text-sm">subscribe()</code>. Your components don't need
+			<InlineCode>data</InlineCode> payload you passed to
+			<InlineCode>subscribe()</InlineCode>. Your components don't need
 			to track or re-trigger anything.
 		</p>
 		<p class="text-white/60 leading-relaxed">
-			The <code class="text-accent font-mono text-sm">onReady</code> callback fires after all
+			The <InlineCode>onReady</InlineCode> callback fires after all
 			subscriptions have been re-sent. Use it to fetch any data you may have missed
 			while disconnected:
 		</p>
@@ -149,7 +145,7 @@ export const prerender = true;
 	<ContentSection label="Connection States">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			Track the connection state in your UI with the
-			<code class="text-accent font-mono text-sm">useConnectionState</code> hook:
+			<InlineCode>useConnectionState</InlineCode> hook:
 		</p>
 		<CodeBlock
 			code={`import { useConnectionState } from "@luciodale/react-socket";

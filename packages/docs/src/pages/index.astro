@@ -17,7 +17,14 @@ export const prerender = true;
 					{siteConfig.title}
 				</h1>
 			</div>
-			<p class="text-lg text-white/50 leading-relaxed max-w-xl mb-10">{siteConfig.description}</p>
+			<p class="text-lg text-white/50 leading-relaxed max-w-xl mb-10">
+				A TypeScript-first WebSocket manager for React. Handles the socket plumbing you don't want to build:
+				{" "}<span class="text-accent font-medium">reconnection</span>,
+				{" "}<span class="text-blue-400 font-medium">deduped subscriptions</span>,
+				{" "}<span class="text-green-400 font-medium">in-flight tracking</span>, and
+				{" "}<span class="text-purple-400 font-medium">keep-alive</span>.
+				{" "}Your protocol, your state management, your rules.
+			</p>
 			<button
 				type="button"
 				class="copy-btn group rounded-lg border border-white/10 bg-white/5 hover:bg-white/[0.08] px-5 py-3 font-mono text-sm text-white/70 transition-colors cursor-pointer"

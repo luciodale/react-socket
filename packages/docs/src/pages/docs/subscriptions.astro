@@ -2,6 +2,7 @@
 import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
 import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
 import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
 import DocsPage from "../../layouts/DocsPage.astro";
 import { href } from "../../lib/link";
 
@@ -42,15 +43,15 @@ export const prerender = true;
 
 	<ContentSection label="How It Works">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Each subscription is identified by a <code class="text-accent font-mono text-sm">key</code> string
-			that you choose (e.g. <code class="text-accent font-mono text-sm">"prices:AAPL"</code> or
-			<code class="text-accent font-mono text-sm">"chat:general"</code>). The manager keeps an internal
+			Each subscription is identified by a <InlineCode>key</InlineCode> string
+			that you choose (e.g. <InlineCode>"prices:AAPL"</InlineCode> or
+			<InlineCode>"chat:general"</InlineCode>). The manager keeps an internal
 			counter for each key:
 		</p>
 		<ul class="list-disc list-inside space-y-2 text-white/60 mb-4">
-			<li>First <code class="text-accent font-mono text-sm">subscribe("chat:general")</code> — counter goes to 1, message sent to server</li>
+			<li>First <InlineCode>subscribe("chat:general")</InlineCode> — counter goes to 1, message sent to server</li>
 			<li>Second call with the same key — counter goes to 2, no message sent</li>
-			<li>First <code class="text-accent font-mono text-sm">unsubscribe("chat:general")</code> — counter drops to 1, no message sent</li>
+			<li>First <InlineCode>unsubscribe("chat:general")</InlineCode> — counter drops to 1, no message sent</li>
 			<li>Last unsubscribe — counter drops to 0, unsubscribe message sent to server</li>
 		</ul>
 		<Callout type="tip" title="Strict Mode Safe">
@@ -63,7 +64,7 @@ export const prerender = true;
 	<ContentSection label="Subscribing and Unsubscribing">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			Pass a unique key and an optional message to send to the server.
-			The <code class="text-accent font-mono text-sm">data</code> argument is stored internally and reused
+			The <InlineCode>data</InlineCode> argument is stored internally and reused
 			to re-subscribe after a reconnect:
 		</p>
 		<CodeBlock
@@ -85,7 +86,7 @@ manager.unsubscribe(
 
 	<ContentSection label="Using in React Components">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			The natural place to subscribe is a <code class="text-accent font-mono text-sm">useEffect</code>.
+			The natural place to subscribe is a <InlineCode>useEffect</InlineCode>.
 			Return the unsubscribe as cleanup. Because of ref-counting, you don't need to
 			worry about multiple instances of the same component or strict mode double-firing:
 		</p>
@@ -121,10 +122,10 @@ function ChatRoom({ channel }: { channel: string }) {
 			filename="ChatRoom.tsx"
 		/>
 		<p class="text-white/60 mt-4 leading-relaxed">
-			If <code class="text-accent font-mono text-sm">ChatRoom</code> is rendered five times on the page
+			If <InlineCode>ChatRoom</InlineCode> is rendered five times on the page
 			with the same channel, only one subscribe message is sent to the server.
 			All five components read from the same store, updated by the single
-			<code class="text-accent font-mono text-sm">onMessageReceived</code> callback.
+			<InlineCode>onMessageReceived</InlineCode> callback.
 		</p>
 	</ContentSection>
 
@@ -149,12 +150,12 @@ onMessageReceived(msg) {
 	<ContentSection label="Automatic Restoration on Reconnect">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			When the connection drops and reconnects, the manager automatically re-sends
-			all active subscriptions using the stored <code class="text-accent font-mono text-sm">data</code>
+			all active subscriptions using the stored <InlineCode>data</InlineCode>
 			payload. Your components don't need to do anything — they stay mounted, the
 			manager handles re-subscribing, and messages resume flowing.
 		</p>
 		<p class="text-white/60 leading-relaxed">
-			The <code class="text-accent font-mono text-sm">onReady</code> callback fires after subscriptions
+			The <InlineCode>onReady</InlineCode> callback fires after subscriptions
 			have been restored.
 			See <a href={href("/docs/reconnection")} class="text-accent hover:underline">Reconnection</a> for more.
 		</p>
@@ -163,7 +164,7 @@ onMessageReceived(msg) {
 	<ContentSection label="Cleanup with onLastUnsubscribe">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			When the ref count for a key drops to zero, the
-			<code class="text-accent font-mono text-sm">onLastUnsubscribe</code> callback fires. Use it to
+			<InlineCode>onLastUnsubscribe</InlineCode> callback fires. Use it to
 			clean up related state — for example, clearing cached messages for a channel
 			the user has fully navigated away from:
 		</p>

@@ -1,6 +1,7 @@
 ---
 import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
 import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
 import { ChatRoom } from "../../components/demos/ChatRoom";
 import DocsPage from "../../layouts/DocsPage.astro";
 
@@ -48,8 +49,8 @@ type TServerMsg =
 
 	<ContentSection label="Manager Setup">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			The callbacks act as dispatchers. <code class="text-accent font-mono text-sm">onSendIntent</code>
-			handles optimistic updates, and <code class="text-accent font-mono text-sm">onMessageReceived</code>
+			The callbacks act as dispatchers. <InlineCode>onSendIntent</InlineCode>
+			handles optimistic updates, and <InlineCode>onMessageReceived</InlineCode>
 			branches on message type to dispatch the right logic:
 		</p>
 		<CodeBlock
@@ -107,7 +108,7 @@ type TServerMsg =
 
 	<ContentSection label="Subscription Hook">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			The <code class="text-accent font-mono text-sm">useChat</code> hook subscribes on mount and
+			The <InlineCode>useChat</InlineCode> hook subscribes on mount and
 			unsubscribes on cleanup. Multiple components using the same channel share
 			a single server subscription:
 		</p>

@@ -1,6 +1,7 @@
 ---
 import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
 import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
 import { UndeliveredSync } from "../../components/demos/UndeliveredSync";
 import DocsPage from "../../layouts/DocsPage.astro";
 
@@ -21,9 +22,9 @@ export const prerender = true;
 			Hit <strong class="text-white/80">Disconnect</strong>, send a few messages (they'll
 			be saved immediately), then hit <strong class="text-white/80">Reconnect</strong>.
 			The messages move through:
-			<code class="text-accent font-mono text-sm">saved for retry</code> &rarr;
-			<code class="text-accent font-mono text-sm">retrying</code> &rarr;
-			<code class="text-accent font-mono text-sm">delivered</code>.
+			<InlineCode>saved for retry</InlineCode> &rarr;
+			<InlineCode>retrying</InlineCode> &rarr;
+			<InlineCode>delivered</InlineCode>.
 		</p>
 		<UndeliveredSync client:load />
 	</ContentSection>
@@ -56,10 +57,10 @@ await undelivered.init();`}
 	<ContentSection label="Saving Undelivered Messages">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			Messages can fail to deliver in two ways. If the connection drops mid-send,
-			<code class="text-accent font-mono text-sm">onInFlightDrop</code> fires and you save
+			<InlineCode>onInFlightDrop</InlineCode> fires and you save
 			the dropped messages. If the user sends while already disconnected,
-			<code class="text-accent font-mono text-sm">send()</code> returns
-			<code class="text-accent font-mono text-sm">false</code> and you save immediately:
+			<InlineCode>send()</InlineCode> returns
+			<InlineCode>false</InlineCode> and you save immediately:
 		</p>
 		<CodeBlock
 			code={`// Path 1: connection drops while messages are in-flight
@@ -93,7 +94,7 @@ function handleSend(channel: string, text: string) {
 
 	<ContentSection label="Retrying on Reconnect">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			The <code class="text-accent font-mono text-sm">onReady</code> callback fires after a
+			The <InlineCode>onReady</InlineCode> callback fires after a
 			reconnect, once subscriptions have been restored. This is the right place
 			to retry any saved messages:
 		</p>

@@ -1,6 +1,7 @@
 ---
 import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
 import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
 import { InComponentEcho } from "../../components/demos/InComponentEcho";
 import DocsPage from "../../layouts/DocsPage.astro";
 import { href } from "../../lib/link";
@@ -13,9 +14,9 @@ export const prerender = true;
 		<p class="text-white/60 mb-6 leading-relaxed">
 			This is the absolute minimum you need to get react-socket working. One component,
 			one message type, no store, no effects for lifecycle management. Create the manager
-			in a <code class="text-accent font-mono text-sm">useMemo</code>, store the response in
-			<code class="text-accent font-mono text-sm">useState</code>, call
-			<code class="text-accent font-mono text-sm">send()</code>. That's it.
+			in a <InlineCode>useMemo</InlineCode>, store the response in
+			<InlineCode>useState</InlineCode>, call
+			<InlineCode>send()</InlineCode>. That's it.
 		</p>
 		<p class="text-white/60 leading-relaxed">
 			This pattern is fire-and-forget: you send a message and move on. No acknowledgment
@@ -31,10 +32,10 @@ export const prerender = true;
 	<ContentSection label="Source">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			The entire example. Notice how
-			<code class="text-accent font-mono text-sm">TClientMsg</code> and
-			<code class="text-accent font-mono text-sm">TServerMsg</code> type the manager generics, so
-			every <code class="text-accent font-mono text-sm">send()</code> call and every
-			<code class="text-accent font-mono text-sm">onMessageReceived</code> callback is fully typed:
+			<InlineCode>TClientMsg</InlineCode> and
+			<InlineCode>TServerMsg</InlineCode> type the manager generics, so
+			every <InlineCode>send()</InlineCode> call and every
+			<InlineCode>onMessageReceived</InlineCode> callback is fully typed:
 		</p>
 		<CodeBlock
 			code={`import { useMemo, useState } from "react";

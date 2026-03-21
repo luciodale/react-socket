@@ -1,6 +1,7 @@
 ---
 import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
 import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
 import { FireAndForget } from "../../components/demos/FireAndForget";
 import DocsPage from "../../layouts/DocsPage.astro";
 
@@ -22,9 +23,9 @@ export const prerender = true;
 	<ContentSection label="Source">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			The entire example in a single component. The manager is created inside
-			<code class="text-accent font-mono text-sm">useMemo</code>, state lives in
-			<code class="text-accent font-mono text-sm">useState</code>, and
-			<code class="text-accent font-mono text-sm">send()</code> is called with no tracking:
+			<InlineCode>useMemo</InlineCode>, state lives in
+			<InlineCode>useState</InlineCode>, and
+			<InlineCode>send()</InlineCode> is called with no tracking:
 		</p>
 		<CodeBlock
 			code={`import { useMemo, useState, useEffect } from "react";
