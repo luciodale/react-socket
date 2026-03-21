@@ -4,7 +4,7 @@ export const siteConfig: SiteConfig = {
 	title: "react-socket",
 	description:
 		"A TypeScript-first WebSocket manager for React. Handles the socket plumbing you don't want to build: reconnection, deduped subscriptions, in-flight tracking, and keep-alive. Your protocol, your state management, your rules.",
-	siteUrl: "https://react-socket-docs.pages.dev",
+	siteUrl: "https://koolcodez.com/projects/react-socket",
 	logoSrc: "/logo.svg",
 	logoAlt: "react-socket logo",
 	ogImage: "/og-image.png",
