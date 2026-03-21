@@ -1,0 +1,142 @@
+---
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import { ChatRoom } from "../../components/demos/ChatRoom";
+import DocsPage from "../../layouts/DocsPage.astro";
+
+export const prerender = true;
+---
+
+<DocsPage title="Chat Room" description="A multi-channel chat demo showing subscriptions, optimistic sends, and the callback-as-dispatcher pattern.">
+	<ContentSection label="Chat Room">
+		<p class="text-white/60 mb-6 leading-relaxed">
+			A multi-channel chat showing the core patterns: typed protocol, ref-counted
+			subscriptions, acknowledged sends with optimistic updates, and the
+			callback-as-dispatcher approach to message handling.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Live Demo">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Try changing the channel name to see subscriptions in action. Each channel
+			maintains its own message history, and switching back preserves your messages.
+		</p>
+		<ChatRoom client:load />
+	</ContentSection>
+
+	<ContentSection label="Protocol">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			The message types define the entire contract between client and server.
+			Everything flows from these two unions:
+		</p>
+		<CodeBlock
+			code={`type TClientMsg =
+  | { action: "ping" }
+  | { action: "subscribe"; channel: string }
+  | { action: "unsubscribe"; channel: string }
+  | { action: "message"; id: string; channel: string; text: string };
+
+type TServerMsg =
+  | { action: "pong" }
+  | { action: "subscribe_ack"; channel: string }
+  | { action: "unsubscribe_ack"; channel: string }
+  | { action: "message"; id: string; channel: string; sender: string; text: string };`}
+			language="tsx"
+			filename="ChatRoom.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Manager Setup">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			The callbacks act as dispatchers. <code class="text-accent font-mono text-sm">onSendIntent</code>
+			handles optimistic updates, and <code class="text-accent font-mono text-sm">onMessageReceived</code>
+			branches on message type to dispatch the right logic:
+		</p>
+		<CodeBlock
+			code={`const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  url: getWsUrl(),
+  serialize: (msg) => JSON.stringify(msg),
+  deserialize: (raw) => JSON.parse(raw) as TServerMsg,
+
+  ping: () => ({ action: "ping" }),
+  isPong: (msg) => msg.action === "pong",
+
+  onSendIntent({ data, ackId }) {
+    if (data.action !== "message" || !ackId) return;
+    // Add to store immediately for instant UI feedback
+    useStore.setState((s) => ({
+      messages: {
+        ...s.messages,
+        [data.channel]: [
+          ...(s.messages[data.channel] ?? []),
+          { id: ackId, sender: "you", text: data.text },
+        ],
+      },
+    }));
+  },
+
+  onMessageReceived(msg) {
+    switch (msg.action) {
+      case "subscribe_ack":
+        manager.resolvePendingSubscription(msg.channel);
+        break;
+      case "message":
+        manager.ackInFlight(msg.id);
+        // Add to store, skip duplicates from optimistic add
+        useStore.setState((s) => {
+          const existing = s.messages[msg.channel] ?? [];
+          if (existing.some((m) => m.id === msg.id)) return s;
+          return {
+            messages: {
+              ...s.messages,
+              [msg.channel]: [
+                ...existing,
+                { id: msg.id, sender: msg.sender, text: msg.text },
+              ],
+            },
+          };
+        });
+        break;
+    }
+  },
+});`}
+			language="tsx"
+			filename="ChatRoom.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Subscription Hook">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			The <code class="text-accent font-mono text-sm">useChat</code> hook subscribes on mount and
+			unsubscribes on cleanup. Multiple components using the same channel share
+			a single server subscription:
+		</p>
+		<CodeBlock
+			code={`function useChat(channel: string) {
+  const messages = useStore((s) => s.messages[channel] ?? EMPTY);
+
+  useEffect(() => {
+    manager.subscribe(channel, { action: "subscribe", channel });
+    return () => {
+      manager.unsubscribe(channel, { action: "unsubscribe", channel });
+    };
+  }, [channel]);
+
+  const sendMessage = useCallback(
+    (text: string) => {
+      const id = crypto.randomUUID();
+      manager.send({
+        data: { action: "message", id, channel, text },
+        ackId: id,
+      });
+    },
+    [channel],
+  );
+
+  return { messages, sendMessage };
+}`}
+			language="tsx"
+			filename="ChatRoom.tsx"
+		/>
+	</ContentSection>
+</DocsPage>

@@ -1,0 +1,234 @@
+---
+import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import DocsPage from "../../layouts/DocsPage.astro";
+
+export const prerender = true;
+---
+
+<DocsPage title="Undelivered Sync">
+	<ContentSection label="Undelivered Sync">
+		<p class="text-white/60 mb-6 leading-relaxed">
+			When messages fail to deliver (e.g. the connection drops mid-send), you can
+			persist them to storage and retry later. The
+			<code class="text-accent font-mono text-sm">createUndeliveredSync</code> utility handles
+			this with a channel-based store backed by any async storage.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="When You Need It">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Without undelivered sync, messages that fail to send are simply lost. This is
+			fine for ephemeral data like cursor positions, but for important messages
+			(chat, commands, form submissions) you'll want persistence. There are two
+			scenarios where messages need saving:
+		</p>
+		<p class="text-white/60 mb-2 leading-relaxed">
+			<strong class="text-white/80">Connection drops mid-send:</strong>
+		</p>
+		<ol class="list-decimal list-inside space-y-2 text-white/60 mb-4">
+			<li>User sends a message while online — it enters the in-flight map</li>
+			<li>Connection drops before the server confirms — <code class="text-accent font-mono text-sm">onInFlightDrop</code> fires</li>
+			<li>Save the dropped messages to the undelivered store</li>
+			<li>On reconnect, <code class="text-accent font-mono text-sm">onReady</code> retries them</li>
+		</ol>
+		<p class="text-white/60 mb-2 leading-relaxed">
+			<strong class="text-white/80">User sends while already disconnected:</strong>
+		</p>
+		<ol class="list-decimal list-inside space-y-2 text-white/60">
+			<li><code class="text-accent font-mono text-sm">send()</code> returns <code class="text-accent font-mono text-sm">false</code> — the message never enters the in-flight map</li>
+			<li>Save it to the undelivered store immediately</li>
+			<li>On reconnect, <code class="text-accent font-mono text-sm">onReady</code> picks it up and retries</li>
+		</ol>
+	</ContentSection>
+
+	<ContentSection label="Setup">
+		<CodeBlock
+			code={`import {
+  createUndeliveredSync,
+  createLocalStorage,
+} from "@luciodale/react-socket";
+
+type TUndeliveredMsg = {
+  id: string;       // required — used for deduplication
+  channel: string;
+  text: string;
+};
+
+const undelivered = createUndeliveredSync<TUndeliveredMsg>({
+  storage: createLocalStorage(),
+  storageKey: "ws_undelivered", // optional, defaults to "ws_undelivered_messages"
+});
+
+// Load any previously saved messages from storage
+await undelivered.init();`}
+			language="tsx"
+			filename="undelivered.ts"
+		/>
+		<Callout type="warning" title="Initialize First">
+			You must call <code>init()</code> before using any other method. It loads
+			previously saved messages from storage. Connect the manager only after
+			<code>init()</code> resolves.
+		</Callout>
+		<Callout type="tip" title="Built-in Deduplication">
+			The generic type must have an <code>id: string</code> field. Calling
+			<code>addMessage</code> with an existing ID is a no-op, so you never
+			get duplicate entries.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Storage Interface">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			<code class="text-accent font-mono text-sm">createLocalStorage()</code> wraps
+			<code class="text-accent font-mono text-sm">window.localStorage</code> with error handling.
+			You can provide any storage that implements
+			<code class="text-accent font-mono text-sm">IStorage</code>:
+		</p>
+		<CodeBlock
+			code={`import type { IStorage } from "@luciodale/react-socket";
+
+const customStorage: IStorage = {
+  getItem(key: string): Promise<string | null> { /* ... */ },
+  setItem(key: string, value: string): Promise<void> { /* ... */ },
+  removeItem(key: string): Promise<void> { /* ... */ },
+};`}
+			language="tsx"
+			filename="storage.ts"
+		/>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			All methods are async, so you can use IndexedDB, a server-side API,
+			or any other async store.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="API">
+		<CodeBlock
+			code={`// Initialize — must be called before using the store
+await undelivered.init();
+
+// Check if initialized
+undelivered.isInitialized(); // boolean
+
+// Get messages for a channel
+undelivered.getChannelMessages("general"); // TUndeliveredMsg[]
+
+// Add a message (no-op if the ID already exists)
+undelivered.addMessage("general", { id: "abc", channel: "general", text: "hello" });
+
+// Remove a single message by ID
+undelivered.removeMessage("general", "abc");
+
+// Replace all messages for a channel
+undelivered.setChannelMessages("general", [msg1, msg2]);
+
+// Clear a single channel
+undelivered.clearChannel("general");
+
+// Clear everything and remove from storage
+undelivered.clearAll();
+
+// Subscribe to changes (returns unsubscribe function)
+const unsub = undelivered.subscribe(() => {
+  console.log("Undelivered store changed");
+});`}
+			language="tsx"
+			filename="api.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Integration with the Manager">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Wire the undelivered store into the manager's callbacks. There are two
+			save paths: <code class="text-accent font-mono text-sm">onInFlightDrop</code> for
+			messages dropped on disconnect, and a check on
+			<code class="text-accent font-mono text-sm">send()</code>'s return value for messages
+			sent while already offline:
+		</p>
+		<CodeBlock
+			code={`const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  // ...
+
+  // Save messages that were in-flight when the connection dropped
+  onInFlightDrop(messages) {
+    for (const { id, data } of messages) {
+      if (data.action === "message") {
+        undelivered.addMessage(data.channel, {
+          id,
+          channel: data.channel,
+          text: data.text,
+        });
+      }
+    }
+  },
+
+  // When a message is confirmed, remove it from undelivered
+  onMessageReceived(msg) {
+    if (msg.action === "message") {
+      manager.ackInFlight(msg.id);
+      undelivered.removeMessage(msg.channel, msg.id);
+    }
+  },
+
+  // Retry undelivered messages after reconnecting
+  onReady() {
+    for (const channel of ["general", "random"]) {
+      for (const msg of undelivered.getChannelMessages(channel)) {
+        manager.send({
+          data: { action: "message", id: msg.id, channel, text: msg.text },
+          ackId: msg.id,
+        });
+      }
+    }
+  },
+});
+
+// When sending, check the return value — if false, save immediately
+function sendMessage(channel: string, text: string) {
+  const id = crypto.randomUUID();
+  const sent = manager.send({
+    data: { action: "message", id, channel, text },
+    ackId: id,
+  });
+  if (!sent) {
+    undelivered.addMessage(channel, { id, channel, text });
+  }
+}`}
+			language="tsx"
+			filename="manager.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Reactivity">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Use the <code class="text-accent font-mono text-sm">subscribe</code> method to react to changes.
+			With Zustand, you can expose undelivered messages as part of your store:
+		</p>
+		<CodeBlock
+			code={`import { useSyncExternalStore } from "react";
+
+function useUndeliveredMessages(channel: string) {
+  return useSyncExternalStore(
+    (cb) => undelivered.subscribe(cb),
+    () => undelivered.getChannelMessages(channel),
+  );
+}`}
+			language="tsx"
+			filename="useUndeliveredMessages.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Next Steps">
+		<ul class="space-y-2 text-white/60">
+			<li>
+				<a href="/docs/optimistic-updates" class="text-accent hover:underline">Optimistic Updates</a> — the in-flight tracking that feeds into undelivered sync
+			</li>
+			<li>
+				<a href="/docs/reconnection" class="text-accent hover:underline">Reconnection</a> — when onReady fires and how to retry
+			</li>
+			<li>
+				<a href="/docs/api" class="text-accent hover:underline">API Reference</a> — full method list
+			</li>
+		</ul>
+	</ContentSection>
+</DocsPage>

@@ -1,0 +1,82 @@
+---
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import { FireAndForget } from "../../components/demos/FireAndForget";
+import DocsPage from "../../layouts/DocsPage.astro";
+
+export const prerender = true;
+---
+
+<DocsPage title="Fire and Forget" description="The simplest react-socket example: send a message, get a response, no tracking needed.">
+	<ContentSection label="Fire and Forget">
+		<p class="text-white/60 mb-6 leading-relaxed">
+			The simplest way to use react-socket. One component, one message type, no
+			store, no subscriptions. Send a message, get a response.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Live Demo">
+		<FireAndForget client:load />
+	</ContentSection>
+
+	<ContentSection label="Source">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			The entire example in a single component. The manager is created inside
+			<code class="text-accent font-mono text-sm">useMemo</code>, state lives in
+			<code class="text-accent font-mono text-sm">useState</code>, and
+			<code class="text-accent font-mono text-sm">send()</code> is called with no tracking:
+		</p>
+		<CodeBlock
+			code={`import { useMemo, useState, useEffect } from "react";
+import { useConnectionState, WebSocketManager } from "@luciodale/react-socket";
+
+type TClientMsg = { action: "echo"; text: string };
+type TServerMsg = { action: "echo"; text: string };
+
+function EchoDemo() {
+  const [input, setInput] = useState("");
+  const [messages, setMessages] = useState<
+    Array<{ id: string; from: "you" | "server"; text: string }>
+  >([]);
+
+  const manager = useMemo(() => {
+    const m = new WebSocketManager<TClientMsg, TServerMsg>({
+      url: "ws://localhost:3001/ws",
+      serialize: (msg) => JSON.stringify(msg),
+      deserialize: (raw) => JSON.parse(raw),
+
+      onMessageReceived(msg) {
+        setMessages((prev) => [
+          ...prev,
+          { id: crypto.randomUUID(), from: "server", text: msg.text },
+        ]);
+      },
+    });
+    return m;
+  }, []);
+
+  useEffect(() => {
+    manager.connect();
+    return () => manager.disconnect();
+  }, [manager]);
+
+  const state = useConnectionState(manager);
+
+  function handleSend() {
+    if (!input.trim()) return;
+    const text = input.trim();
+    setMessages((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), from: "you", text },
+    ]);
+    manager.send({ data: { action: "echo", text } });
+    setInput("");
+  }
+
+  // ... render
+}`}
+			language="tsx"
+			filename="EchoDemo.tsx"
+		/>
+	</ContentSection>
+</DocsPage>

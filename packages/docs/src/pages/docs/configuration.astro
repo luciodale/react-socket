@@ -1,0 +1,231 @@
+---
+import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import PropsTable from "@luciodale/docs-ui-kit/components/PropsTable.astro";
+import DocsPage from "../../layouts/DocsPage.astro";
+
+export const prerender = true;
+---
+
+<DocsPage title="Configuration">
+	<ContentSection label="Configuration">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			The manager is configured through a single options object. Only three fields
+			are required — a URL and a pair of serialization functions. Everything else
+			has sensible defaults. Because the constructor is generic over your message
+			types, every option is fully typed.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Options at a Glance">
+		<PropsTable
+			rows={[
+				{ name: "url", type: "string", description: "WebSocket endpoint URL", required: true },
+				{ name: "serialize", type: "(msg: TClientMsg) => string", description: "Convert outgoing messages to strings", required: true },
+				{ name: "deserialize", type: "(raw: string) => TServerMsg", description: "Parse incoming strings into typed messages", required: true },
+				{ name: "ping", type: "() => TClientMsg", description: "Function returning the ping message, called each interval" },
+				{ name: "isPong", type: "(msg: TServerMsg) => boolean", description: "Return true if an incoming message is a pong" },
+				{ name: "pingIntervalMs", type: "number", defaultValue: "30000", description: "Milliseconds between pings" },
+				{ name: "pongTimeoutMs", type: "number", defaultValue: "10000", description: "Milliseconds to wait for a pong before disconnecting" },
+				{ name: "reconnectMaxAttempts", type: "number", defaultValue: "5", description: "Maximum reconnection attempts" },
+				{ name: "reconnectBaseDelayMs", type: "number", defaultValue: "1000", description: "Initial reconnection delay" },
+				{ name: "reconnectMaxDelayMs", type: "number", defaultValue: "5000", description: "Maximum reconnection delay" },
+				{ name: "transport", type: "IWebSocketTransport", description: "Custom WebSocket transport for testing or non-browser environments" },
+				{ name: "onMessageReceived", type: "(msg: TServerMsg) => void", description: "Called for every incoming message (except pongs)" },
+				{ name: "onSendIntent", type: "(params: TSendParams) => void", description: "Called on every send(), even when offline" },
+				{ name: "onConnectionStateChange", type: "(state: TConnectionState) => void", description: "Called when connection state changes" },
+				{ name: "onReady", type: "() => void", description: "Called after (re)connect once subscriptions are restored" },
+				{ name: "onInFlightDrop", type: "(messages) => void", description: "Called when in-flight messages are dropped on disconnect" },
+				{ name: "onLastUnsubscribe", type: "(key, data) => void", description: "Called when the last subscriber for a key leaves" },
+				{ name: "onDebug", type: "(event: TDebugEvent) => void", description: "Called for every internal event" },
+			]}
+		/>
+	</ContentSection>
+
+	<ContentSection label="Required Options">
+		<CodeBlock
+			code={`const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  // The WebSocket endpoint
+  url: "wss://api.example.com/ws",
+
+  // How to turn your typed messages into strings for the wire
+  serialize: (msg) => JSON.stringify(msg),
+
+  // How to turn incoming strings back into typed messages
+  deserialize: (raw) => JSON.parse(raw),
+});`}
+			language="tsx"
+			filename="manager.ts"
+		/>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			The <code class="text-accent font-mono text-sm">serialize</code> and
+			<code class="text-accent font-mono text-sm">deserialize</code> functions are typed against
+			your generics, so TypeScript ensures you're producing and consuming the right shapes.
+			You can use JSON, MessagePack, Protobuf — whatever your server speaks.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Ping / Pong">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Keep-alive pings prevent idle connections from being dropped by proxies
+			or load balancers. The <code class="text-accent font-mono text-sm">ping</code> option is
+			a function, so you can include dynamic values like timestamps:
+		</p>
+		<CodeBlock
+			code={`{
+  // Called on every interval tick — return a fresh ping message
+  ping: () => ({ action: "ping", timestamp: Date.now() }),
+
+  // Return true if an incoming message is a pong
+  isPong: (msg) => msg.action === "pong",
+
+  // How often to send pings (default: 30000ms)
+  pingIntervalMs: 30_000,
+
+  // How long to wait for a pong before disconnecting (default: 10000ms)
+  pongTimeoutMs: 10_000,
+}`}
+			language="tsx"
+			filename="manager.ts"
+		/>
+		<Callout type="info">
+			If <code>isPong</code> is provided and the server doesn't respond within
+			<code>pongTimeoutMs</code>, the connection is closed and reconnection begins
+			automatically.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Reconnection">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			When a connection drops unexpectedly, the manager automatically reconnects
+			using exponential backoff with jitter. See the
+			<a href="/docs/reconnection" class="text-accent hover:underline">Reconnection</a> guide for the full picture.
+		</p>
+		<CodeBlock
+			code={`{
+  // Maximum reconnect attempts before giving up (default: 5)
+  reconnectMaxAttempts: 5,
+
+  // Initial delay before the first retry (default: 1000ms)
+  reconnectBaseDelayMs: 1_000,
+
+  // Cap on the delay between retries (default: 5000ms)
+  reconnectMaxDelayMs: 5_000,
+}`}
+			language="tsx"
+			filename="manager.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Callbacks as Dispatchers">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Callbacks are where your application logic lives. Think of them as dispatchers —
+			each one handles a specific moment in the message lifecycle. The manager calls
+			them at the right time; you decide what to do:
+		</p>
+		<CodeBlock
+			code={`{
+  // The main dispatcher. Branch on message type to handle each variant.
+  // This is where you update your store, ack in-flight messages, and
+  // resolve pending subscriptions.
+  onMessageReceived(msg) {
+    switch (msg.action) {
+      case "subscribe_ack":
+        manager.resolvePendingSubscription(\`chat:\${msg.channel}\`);
+        break;
+      case "message":
+        manager.ackInFlight(msg.id);
+        store.addMessage(msg);
+        break;
+    }
+  },
+
+  // Fires on every send() — even when offline.
+  // The right place for optimistic UI updates.
+  onSendIntent({ data, ackId }) {
+    if (data.action === "message" && ackId) {
+      store.addOptimistic(data, ackId);
+    }
+  },
+
+  // Connection state changes: "disconnected" | "connecting" | "connected" | "reconnecting"
+  onConnectionStateChange(state) {
+    console.log("Connection:", state);
+  },
+
+  // Fires after a (re)connect once subscriptions have been restored.
+  // Good place to sync any state you may have missed while offline.
+  onReady() {
+    fetchMissedMessages();
+  },
+
+  // In-flight messages that never got confirmed before a disconnect.
+  // Save them for retry or mark them as failed.
+  onInFlightDrop(messages) {
+    for (const { id } of messages) {
+      store.markFailed(id);
+    }
+  },
+
+  // The last subscriber for a key left. Clean up related state.
+  onLastUnsubscribe(key, data) {
+    store.clearChannel(key);
+  },
+
+  // Every internal event — useful for debugging and the inspector panel.
+  onDebug(event) {
+    console.log(event.type, event);
+  },
+}`}
+			language="tsx"
+			filename="manager.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Custom Transport">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			By default the manager uses the browser's native <code class="text-accent font-mono text-sm">WebSocket</code>.
+			You can provide a custom transport that implements
+			<code class="text-accent font-mono text-sm">IWebSocketTransport</code> — useful for
+			testing or non-browser environments:
+		</p>
+		<CodeBlock
+			code={`import type { IWebSocketTransport } from "@luciodale/react-socket";
+
+const customTransport: IWebSocketTransport = {
+  connect(url, protocols) { /* ... */ },
+  disconnect(code, reason) { /* ... */ },
+  send(data) { /* ... */ },
+  readyState: 0,
+  onopen: null,
+  onclose: null,
+  onmessage: null,
+  onerror: null,
+};
+
+const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  url: "wss://api.example.com/ws",
+  serialize: (msg) => JSON.stringify(msg),
+  deserialize: (raw) => JSON.parse(raw),
+  transport: customTransport,
+});`}
+			language="tsx"
+			filename="manager.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Next Steps">
+		<ul class="space-y-2 text-white/60">
+			<li>
+				<a href="/docs/api" class="text-accent hover:underline">API Reference</a> — every method and type
+			</li>
+			<li>
+				<a href="/docs/subscriptions" class="text-accent hover:underline">Subscriptions</a> — channels with automatic deduplication
+			</li>
+			<li>
+				<a href="/docs/optimistic-updates" class="text-accent hover:underline">Sending Messages</a> — fire-and-forget and acknowledged sends
+			</li>
+		</ul>
+	</ContentSection>
+</DocsPage>

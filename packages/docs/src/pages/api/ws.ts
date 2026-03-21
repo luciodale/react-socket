@@ -1,3 +1,7 @@
+import type { APIRoute } from "astro";
+
+export const prerender = false;
+
 // ── Types ────────────────────────────────────────────────────────────
 
 type TClientMsg =
@@ -20,9 +24,9 @@ type TServerMsg =
 			text: string;
 	  };
 
-// ── Message handler ─────────────────────────────────────────────────
+// ── Handler ─────────────────────────────────────────────────────────
 
-function handleMessage(ws: { send: (data: string) => void }, msg: TClientMsg) {
+function handleMessage(ws: WebSocket, msg: TClientMsg) {
 	const send = (data: TServerMsg) => ws.send(JSON.stringify(data));
 
 	switch (msg.action) {
@@ -43,7 +47,6 @@ function handleMessage(ws: { send: (data: string) => void }, msg: TClientMsg) {
 			break;
 
 		case "message": {
-			// Echo the user's message back (confirms delivery)
 			send({
 				action: "message",
 				id: msg.id,
@@ -51,8 +54,6 @@ function handleMessage(ws: { send: (data: string) => void }, msg: TClientMsg) {
 				sender: "you",
 				text: msg.text,
 			});
-
-			// Bot reply after a short delay
 			setTimeout(() => {
 				send({
 					action: "message",
@@ -67,40 +68,27 @@ function handleMessage(ws: { send: (data: string) => void }, msg: TClientMsg) {
 	}
 }
 
-// ── Bun WebSocket server ────────────────────────────────────────────
+// ── CF Workers WebSocket endpoint ───────────────────────────────────
 
-const PORT = 3001;
+export const GET: APIRoute = async ({ request }) => {
+	const upgrade = request.headers.get("Upgrade");
+	if (upgrade !== "websocket") {
+		return new Response("Expected Upgrade: websocket", { status: 426 });
+	}
 
-Bun.serve({
-	port: PORT,
-	fetch(req, server) {
-		const url = new URL(req.url);
-		if (url.pathname === "/ws") {
-			const upgraded = server.upgrade(req);
-			if (!upgraded) {
-				return new Response("WebSocket upgrade failed", { status: 400 });
-			}
-			return undefined;
+	const pair = new WebSocketPair();
+	const [client, server] = Object.values(pair);
+
+	server.accept();
+	server.addEventListener("message", (event) => {
+		try {
+			const msg = JSON.parse(event.data as string) as TClientMsg;
+			handleMessage(server, msg);
+		} catch {
+			// ignore invalid JSON
 		}
-		return new Response("Not found", { status: 404 });
-	},
-	websocket: {
-		message(ws, raw) {
-			const str = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
+	});
 
-			let parsed: Record<string, unknown>;
-			try {
-				parsed = JSON.parse(str) as Record<string, unknown>;
-			} catch {
-				return;
-			}
-
-			handleMessage(
-				{ send: (data: string) => ws.send(data) },
-				parsed as TClientMsg,
-			);
-		},
-	},
-});
-
-console.log(`WebSocket dev server running on ws://localhost:${PORT}/ws`);
+	// @ts-expect-error CF Workers Response extension: webSocket property
+	return new Response(null, { status: 101, webSocket: client });
+};

@@ -1,0 +1,33 @@
+---
+import HeroSection from "@luciodale/docs-ui-kit/components/HeroSection.astro";
+import PageLayout from "@luciodale/docs-ui-kit/components/PageLayout.astro";
+import { siteConfig } from "../config";
+import Base from "../layouts/Base.astro";
+
+export const prerender = true;
+---
+
+<Base title={siteConfig.title} description={siteConfig.description}>
+	<PageLayout config={siteConfig} currentPath="/">
+		<HeroSection
+			title={siteConfig.title}
+			description={siteConfig.description}
+			installCommand={siteConfig.installCommand}
+		>
+			<div class="flex gap-4 mt-2">
+				<a
+					href="/docs/getting-started"
+					class="rounded-lg bg-accent hover:bg-accent-hover px-5 py-2.5 text-sm font-medium text-white transition-colors"
+				>
+					Get Started
+				</a>
+				<a
+					href="/demo/fire-and-forget"
+					class="rounded-lg border border-white/10 bg-white/5 hover:bg-white/[0.08] px-5 py-2.5 text-sm font-medium text-white/70 transition-colors"
+				>
+					Examples
+				</a>
+			</div>
+		</HeroSection>
+	</PageLayout>
+</Base>

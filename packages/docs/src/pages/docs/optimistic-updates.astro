@@ -1,0 +1,225 @@
+---
+import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import DocsPage from "../../layouts/DocsPage.astro";
+
+export const prerender = true;
+---
+
+<DocsPage title="Sending Messages">
+	<ContentSection label="Sending Messages">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			react-socket supports two sending patterns, and you choose per message
+			which one to use:
+		</p>
+		<ul class="list-disc list-inside space-y-2 text-white/60 mb-4">
+			<li><strong class="text-white/80">Fire and forget</strong> — send a message and move on. No tracking, no confirmation needed.</li>
+			<li><strong class="text-white/80">Acknowledged</strong> — send a message with an ID, track it as "in-flight" until the server confirms delivery.</li>
+		</ul>
+		<p class="text-white/60 leading-relaxed">
+			Both patterns go through <code class="text-accent font-mono text-sm">manager.send()</code>.
+			The difference is whether you pass an
+			<code class="text-accent font-mono text-sm">ackId</code>.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Fire and Forget">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			The simplest sending pattern. Call <code class="text-accent font-mono text-sm">send()</code>
+			with just a <code class="text-accent font-mono text-sm">data</code> payload.
+			The message goes out over the wire and you're done:
+		</p>
+		<CodeBlock
+			code={`manager.send({
+  data: { action: "cursor_move", x: 100, y: 200 },
+});`}
+			language="tsx"
+			filename="fire-and-forget.ts"
+		/>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			<code class="text-accent font-mono text-sm">send()</code> returns
+			<code class="text-accent font-mono text-sm">true</code> if the message was sent, or
+			<code class="text-accent font-mono text-sm">false</code> if the connection is down.
+			For fire-and-forget messages like cursor positions or typing indicators,
+			a lost message is usually fine — the next one will arrive shortly.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Acknowledged Sends">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			When delivery matters — like chat messages or form submissions — pass an
+			<code class="text-accent font-mono text-sm">ackId</code>. This tells the manager to track the
+			message as "in-flight" until you explicitly acknowledge it:
+		</p>
+		<CodeBlock
+			code={`const id = crypto.randomUUID();
+
+manager.send({
+  data: { action: "message", id, channel: "general", text: "hello" },
+  ackId: id,
+});`}
+			language="tsx"
+			filename="acknowledged-send.ts"
+		/>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			The <code class="text-accent font-mono text-sm">ackId</code> is the link between the sent message
+			and the server's confirmation. Typically you use the same ID in the message payload
+			so the server can echo it back.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="How Acknowledgment Works">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Here's the full flow:
+		</p>
+		<ol class="list-decimal list-inside space-y-2 text-white/60 mb-4">
+			<li>You call <code class="text-accent font-mono text-sm">send()</code> with an <code class="text-accent font-mono text-sm">ackId</code></li>
+			<li><code class="text-accent font-mono text-sm">onSendIntent</code> fires immediately — this is where you add the message to your UI optimistically</li>
+			<li>If connected, the message goes over the wire and is stored in the in-flight map</li>
+			<li>The server processes the message and echoes it back (with the same ID)</li>
+			<li>In <code class="text-accent font-mono text-sm">onMessageReceived</code>, you call <code class="text-accent font-mono text-sm">manager.ackInFlight(msg.id)</code> to confirm delivery</li>
+		</ol>
+		<CodeBlock
+			code={`const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  // ...
+
+  // Step 2: fires on every send(), even when offline
+  onSendIntent({ data, ackId }) {
+    if (data.action === "message" && ackId) {
+      // Add to your store immediately for instant UI feedback
+      store.addMessage({ ...data, pending: true });
+    }
+  },
+
+  // Step 5: server echoed the message back
+  onMessageReceived(msg) {
+    if (msg.action === "message") {
+      // Remove from in-flight tracking
+      manager.ackInFlight(msg.id);
+
+      // Mark as confirmed in your store
+      store.confirmMessage(msg.id);
+    }
+  },
+});`}
+			language="tsx"
+			filename="manager.ts"
+		/>
+		<Callout type="info" title="Works Offline">
+			<code>onSendIntent</code> fires <em>before</em> the message hits the wire, and
+			it fires even when the connection is down. This is what makes optimistic UI
+			possible — the user sees their message instantly, and the confirmation catches up.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="When the Connection Drops">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			If the connection drops while messages are in-flight, they haven't been
+			confirmed — so the manager clears them and fires
+			<code class="text-accent font-mono text-sm">onInFlightDrop</code>. This is your chance to
+			mark them as failed in the UI or save them for
+			<a href="/docs/undelivered-sync" class="text-accent hover:underline">retry later</a>:
+		</p>
+		<CodeBlock
+			code={`const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  // ...
+  onInFlightDrop(messages) {
+    for (const { id, data } of messages) {
+      // Option 1: mark as failed
+      store.markFailed(id);
+
+      // Option 2: save for retry after reconnect
+      undelivered.addMessage(data.channel, { id, ...data });
+    }
+  },
+});`}
+			language="tsx"
+			filename="manager.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Putting It All Together">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Here's the full pattern with a Zustand store. Notice how the manager callbacks
+			act as dispatchers — each message type gets its own handling block:
+		</p>
+		<CodeBlock
+			code={`import { create } from "zustand";
+import { WebSocketManager } from "@luciodale/react-socket";
+
+type TMessage = {
+  id: string;
+  channel: string;
+  text: string;
+  sender: string;
+  pending?: boolean;
+};
+
+const useStore = create<{ messages: TMessage[] }>(() => ({
+  messages: [],
+}));
+
+const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  url: "wss://api.example.com/ws",
+  serialize: (msg) => JSON.stringify(msg),
+  deserialize: (raw) => JSON.parse(raw),
+
+  onSendIntent({ data, ackId }) {
+    if (data.action !== "message" || !ackId) return;
+    useStore.setState((s) => ({
+      messages: [...s.messages, {
+        id: ackId,
+        channel: data.channel,
+        text: data.text,
+        sender: "me",
+        pending: true,
+      }],
+    }));
+  },
+
+  onMessageReceived(msg) {
+    switch (msg.action) {
+      case "subscribe_ack":
+        manager.resolvePendingSubscription(\`chat:\${msg.channel}\`);
+        break;
+
+      case "message":
+        manager.ackInFlight(msg.id);
+        useStore.setState((s) => ({
+          messages: s.messages.some((m) => m.id === msg.id)
+            ? s.messages.map((m) =>
+                m.id === msg.id ? { ...m, pending: false } : m
+              )
+            : [...s.messages, { ...msg, pending: false }],
+        }));
+        break;
+    }
+  },
+
+  onInFlightDrop(messages) {
+    const ids = new Set(messages.map((m) => m.id));
+    useStore.setState((s) => ({
+      messages: s.messages.filter((m) => !ids.has(m.id)),
+    }));
+  },
+});`}
+			language="tsx"
+			filename="manager.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Next Steps">
+		<ul class="space-y-2 text-white/60">
+			<li>
+				<a href="/docs/undelivered-sync" class="text-accent hover:underline">Undelivered Sync</a> — persist failed messages for retry
+			</li>
+			<li>
+				<a href="/docs/reconnection" class="text-accent hover:underline">Reconnection</a> — what happens when the connection drops
+			</li>
+			<li>
+				<a href="/docs/api" class="text-accent hover:underline">API Reference</a> — full method list
+			</li>
+		</ul>
+	</ContentSection>
+</DocsPage>

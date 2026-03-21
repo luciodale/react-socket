@@ -1,0 +1,195 @@
+---
+import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import DocsPage from "../../layouts/DocsPage.astro";
+
+export const prerender = true;
+---
+
+<DocsPage title="Subscriptions">
+	<ContentSection label="Subscriptions">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Subscriptions are one of the most powerful patterns in WebSocket communication.
+			You send a message to the server saying "I'm interested in this data," and the
+			server pushes updates to you over time. Think of it like tuning into a radio
+			channel — you subscribe once, and the updates keep flowing.
+		</p>
+		<p class="text-white/60 leading-relaxed">
+			react-socket makes subscriptions safe and efficient. Multiple components can
+			subscribe to the same channel and only one message is sent to the server.
+			When the last component unmounts, the unsubscribe is sent automatically.
+			No duplicate messages, no leaked subscriptions, no manual bookkeeping.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="The Problem Without Deduplication">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Imagine three components all need live price data for the same stock ticker.
+			Without deduplication, each component sends its own subscribe message — the
+			server sees three identical requests, allocates three sets of resources, and
+			pushes three copies of every update. When components unmount and remount
+			(React strict mode, navigation, dynamic lists), it gets worse.
+		</p>
+		<p class="text-white/60 leading-relaxed">
+			react-socket solves this with ref-counting. The first component to subscribe
+			sends the message. The second and third just increment a counter. Unsubscribes
+			decrement it. Only when the counter hits zero does the actual unsubscribe go
+			out to the server.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="How It Works">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Each subscription is identified by a <code class="text-accent font-mono text-sm">key</code> string
+			that you choose (e.g. <code class="text-accent font-mono text-sm">"prices:AAPL"</code> or
+			<code class="text-accent font-mono text-sm">"chat:general"</code>). The manager keeps an internal
+			counter for each key:
+		</p>
+		<ul class="list-disc list-inside space-y-2 text-white/60 mb-4">
+			<li>First <code class="text-accent font-mono text-sm">subscribe("chat:general")</code> — counter goes to 1, message sent to server</li>
+			<li>Second call with the same key — counter goes to 2, no message sent</li>
+			<li>First <code class="text-accent font-mono text-sm">unsubscribe("chat:general")</code> — counter drops to 1, no message sent</li>
+			<li>Last unsubscribe — counter drops to 0, unsubscribe message sent to server</li>
+		</ul>
+		<Callout type="tip" title="Strict Mode Safe">
+			React strict mode fires effects twice in development. Ref-counting handles
+			this correctly: the counter goes 0 &rarr; 1 &rarr; 0 &rarr; 1, and only one
+			subscribe message is ever sent to the server.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Subscribing and Unsubscribing">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Pass a unique key and an optional message to send to the server.
+			The <code class="text-accent font-mono text-sm">data</code> argument is stored internally and reused
+			to re-subscribe after a reconnect:
+		</p>
+		<CodeBlock
+			code={`// Subscribe — sends the message on first subscriber only
+manager.subscribe(
+  "chat:general",
+  { action: "subscribe", type: "channel", channel: "general" }
+);
+
+// Unsubscribe — sends only when the last subscriber leaves
+manager.unsubscribe(
+  "chat:general",
+  { action: "unsubscribe", type: "channel", channel: "general" }
+);`}
+			language="tsx"
+			filename="subscriptions.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Using in React Components">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			The natural place to subscribe is a <code class="text-accent font-mono text-sm">useEffect</code>.
+			Return the unsubscribe as cleanup. Because of ref-counting, you don't need to
+			worry about multiple instances of the same component or strict mode double-firing:
+		</p>
+		<CodeBlock
+			code={`import { useEffect } from "react";
+
+function ChatRoom({ channel }: { channel: string }) {
+  useEffect(() => {
+    manager.subscribe(
+      \`chat:\${channel}\`,
+      { action: "subscribe", type: "channel", channel }
+    );
+
+    return () => {
+      manager.unsubscribe(
+        \`chat:\${channel}\`,
+        { action: "unsubscribe", type: "channel", channel }
+      );
+    };
+  }, [channel]);
+
+  // Messages arrive via onMessageReceived in the manager
+  // and get dispatched to your store — this component just reads from it
+  const messages = useStore((s) => s.messages[channel] ?? []);
+
+  return (
+    <ul>
+      {messages.map((m) => <li key={m.id}>{m.sender}: {m.text}</li>)}
+    </ul>
+  );
+}`}
+			language="tsx"
+			filename="ChatRoom.tsx"
+		/>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			If <code class="text-accent font-mono text-sm">ChatRoom</code> is rendered five times on the page
+			with the same channel, only one subscribe message is sent to the server.
+			All five components read from the same store, updated by the single
+			<code class="text-accent font-mono text-sm">onMessageReceived</code> callback.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Pending Subscriptions">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			When a subscribe message is sent, the key is marked as "pending" until you
+			explicitly resolve it. This prevents the manager from re-sending if the
+			component re-renders before the server confirms:
+		</p>
+		<CodeBlock
+			code={`// In your onMessageReceived dispatcher:
+onMessageReceived(msg) {
+  if (msg.action === "subscribe_ack") {
+    manager.resolvePendingSubscription(\`chat:\${msg.channel}\`);
+  }
+}`}
+			language="tsx"
+			filename="manager.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Automatic Restoration on Reconnect">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			When the connection drops and reconnects, the manager automatically re-sends
+			all active subscriptions using the stored <code class="text-accent font-mono text-sm">data</code>
+			payload. Your components don't need to do anything — they stay mounted, the
+			manager handles re-subscribing, and messages resume flowing.
+		</p>
+		<p class="text-white/60 leading-relaxed">
+			The <code class="text-accent font-mono text-sm">onReady</code> callback fires after subscriptions
+			have been restored.
+			See <a href="/docs/reconnection" class="text-accent hover:underline">Reconnection</a> for more.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Cleanup with onLastUnsubscribe">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			When the ref count for a key drops to zero, the
+			<code class="text-accent font-mono text-sm">onLastUnsubscribe</code> callback fires. Use it to
+			clean up related state — for example, clearing cached messages for a channel
+			the user has fully navigated away from:
+		</p>
+		<CodeBlock
+			code={`const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  // ...
+  onLastUnsubscribe(key, data) {
+    // No more components are listening to this channel
+    store.clearChannel(key);
+  },
+});`}
+			language="tsx"
+			filename="manager.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Next Steps">
+		<ul class="space-y-2 text-white/60">
+			<li>
+				<a href="/docs/optimistic-updates" class="text-accent hover:underline">Sending Messages</a> — fire-and-forget and acknowledged sends
+			</li>
+			<li>
+				<a href="/docs/reconnection" class="text-accent hover:underline">Reconnection</a> — how subscriptions survive disconnects
+			</li>
+			<li>
+				<a href="/docs/api" class="text-accent hover:underline">API Reference</a> — full method list
+			</li>
+		</ul>
+	</ContentSection>
+</DocsPage>

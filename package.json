@@ -1,42 +1,43 @@
 {
-	"name": "react-socket-monorepo",
-	"version": "1.0.0",
-	"description": "Lightweight WebSocket manager for React.",
-	"private": true,
-	"workspaces": [
-		"packages/*"
-	],
-	"scripts": {
-		"dev": "bun run --filter react-socket-docs dev",
-		"dev:server": "bun run --filter react-socket-docs dev:server",
-		"build": "bun run build:lib && bun run build:docs",
-		"build:lib": "tsc && vite build -c vite.lib.config.mts",
-		"build:docs": "bun run --filter react-socket-docs build",
-		"npm": "bun run build:lib && cd packages/library && npm publish --access public",
-		"npm:test": "bun run build:lib && cd packages/library && npm pack --dry-run",
-		"format": "biome format --write .",
-		"lint": "biome check .",
-		"lint:fix": "biome check --write .",
-		"unit-tests": "vitest",
-		"unit-tests:ci": "vitest run",
-		"test": "bun run unit-tests:ci"
-	},
-	"author": "Lucio D'Alessandro",
-	"license": "MIT",
-	"devDependencies": {
-		"@biomejs/biome": "2.3.14",
-		"@testing-library/jest-dom": "^6.9.1",
-		"@testing-library/react": "^16.3.2",
-		"@types/react": "^18.0.28",
-		"@types/react-dom": "^18.0.11",
-		"@vitejs/plugin-react": "^5.1.4",
-		"jsdom": "^28.0.0",
-		"react": "^18.2.0",
-		"react-dom": "^18.2.0",
-		"typescript": "^5.0.2",
-		"vite": "^7.3.1",
-		"vite-plugin-dts": "^3.9.1",
-		"vitest": "^4.0.18",
-		"zustand": "^5.0.11"
-	}
+  "name": "react-socket-monorepo",
+  "version": "1.0.0",
+  "author": "Lucio D'Alessandro",
+  "devDependencies": {
+    "@biomejs/biome": "2.3.14",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^18.0.28",
+    "@types/react-dom": "^18.0.11",
+    "@vitejs/plugin-react": "^5.1.4",
+    "jsdom": "^28.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "typescript": "^5.0.2",
+    "vite": "^7.3.1",
+    "vite-plugin-dts": "^3.9.1",
+    "vitest": "^4.0.18",
+    "zustand": "^5.0.11"
+  },
+  "description": "Lightweight WebSocket manager for React.",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "bun run --filter react-socket-docs dev",
+    "dev:server": "bun run --filter react-socket-docs dev:server",
+    "build": "bun run build:lib && bun run build:docs",
+    "build:lib": "tsc && vite build -c vite.lib.config.mts",
+    "build:docs": "bun run --filter react-socket-docs build",
+    "deploy:docs": "bun run --filter react-socket-docs deploy",
+    "npm": "bun run build:lib && cd packages/library && npm publish --access public",
+    "npm:test": "bun run build:lib && cd packages/library && npm pack --dry-run",
+    "format": "biome format --write .",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "unit-tests": "vitest",
+    "unit-tests:ci": "vitest run",
+    "test": "bun run unit-tests:ci"
+  },
+  "workspaces": [
+    "packages/*"
+  ]
 }

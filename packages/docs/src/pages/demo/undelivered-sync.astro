@@ -1,0 +1,122 @@
+---
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import { UndeliveredSync } from "../../components/demos/UndeliveredSync";
+import DocsPage from "../../layouts/DocsPage.astro";
+
+export const prerender = true;
+---
+
+<DocsPage title="Undelivered Sync" description="Demonstrates message persistence: send messages, disconnect, and watch them retry automatically.">
+	<ContentSection label="Undelivered Sync">
+		<p class="text-white/60 mb-6 leading-relaxed">
+			This demo shows what happens when you send messages while disconnected.
+			Messages are saved to localStorage and automatically retried when the
+			connection comes back. Watch the status labels to see the full lifecycle.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Live Demo">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Hit <strong class="text-white/80">Disconnect</strong>, send a few messages (they'll
+			be saved immediately), then hit <strong class="text-white/80">Reconnect</strong>.
+			The messages move through:
+			<code class="text-accent font-mono text-sm">saved for retry</code> &rarr;
+			<code class="text-accent font-mono text-sm">retrying</code> &rarr;
+			<code class="text-accent font-mono text-sm">delivered</code>.
+		</p>
+		<UndeliveredSync client:load />
+	</ContentSection>
+
+	<ContentSection label="Persistence Setup">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Create an undelivered store backed by localStorage. Messages are keyed by
+			channel and deduplicated by ID:
+		</p>
+		<CodeBlock
+			code={`import {
+  createUndeliveredSync,
+  createLocalStorage,
+} from "@luciodale/react-socket";
+
+type TStoredMessage = { id: string; channel: string; text: string };
+
+const undelivered = createUndeliveredSync<TStoredMessage>({
+  storage: createLocalStorage(),
+  storageKey: "react_socket_demo_undelivered",
+});
+
+// Load any previously saved messages before connecting
+await undelivered.init();`}
+			language="tsx"
+			filename="UndeliveredSync.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Saving Undelivered Messages">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Messages can fail to deliver in two ways. If the connection drops mid-send,
+			<code class="text-accent font-mono text-sm">onInFlightDrop</code> fires and you save
+			the dropped messages. If the user sends while already disconnected,
+			<code class="text-accent font-mono text-sm">send()</code> returns
+			<code class="text-accent font-mono text-sm">false</code> and you save immediately:
+		</p>
+		<CodeBlock
+			code={`// Path 1: connection drops while messages are in-flight
+onInFlightDrop(messages) {
+  for (const { id, data } of messages) {
+    if (data.action === "message") {
+      undelivered.addMessage(data.channel, {
+        id,
+        channel: data.channel,
+        text: data.text,
+      });
+    }
+  }
+}
+
+// Path 2: user sends while already disconnected
+function handleSend(channel: string, text: string) {
+  const id = crypto.randomUUID();
+  const sent = manager.send({
+    data: { action: "message", id, channel, text },
+    ackId: id,
+  });
+  if (!sent) {
+    undelivered.addMessage(channel, { id, channel, text });
+  }
+}`}
+			language="tsx"
+			filename="UndeliveredSync.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Retrying on Reconnect">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			The <code class="text-accent font-mono text-sm">onReady</code> callback fires after a
+			reconnect, once subscriptions have been restored. This is the right place
+			to retry any saved messages:
+		</p>
+		<CodeBlock
+			code={`onReady() {
+  const saved = undelivered.getChannelMessages("demo");
+  for (const msg of saved) {
+    manager.send({
+      data: { action: "message", id: msg.id, channel: "demo", text: msg.text },
+      ackId: msg.id,
+    });
+  }
+}
+
+// When the server finally confirms, clean up:
+onMessageReceived(msg) {
+  if (msg.action === "message") {
+    manager.ackInFlight(msg.id);
+    undelivered.removeMessage(msg.channel, msg.id);
+  }
+}`}
+			language="tsx"
+			filename="UndeliveredSync.tsx"
+		/>
+	</ContentSection>
+</DocsPage>

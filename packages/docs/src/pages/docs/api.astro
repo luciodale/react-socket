@@ -1,0 +1,302 @@
+---
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import DocsPage from "../../layouts/DocsPage.astro";
+
+export const prerender = true;
+---
+
+<DocsPage title="API Reference">
+	<ContentSection label="API Reference">
+		<p class="text-white/60 mb-6 leading-relaxed">
+			Complete reference for all exports from <code class="text-accent font-mono text-sm">@luciodale/react-socket</code>.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="WebSocketManager">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			The core class. Takes two generic type parameters for your outgoing and incoming
+			message shapes. See <a href="/docs/configuration" class="text-accent hover:underline">Configuration</a> for
+			all constructor options.
+		</p>
+		<CodeBlock
+			code={`import { WebSocketManager } from "@luciodale/react-socket";
+
+const manager = new WebSocketManager<TClientMsg, TServerMsg>(config);`}
+			language="tsx"
+			filename="manager.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Connection Lifecycle">
+		<CodeBlock
+			code={`// Open the connection. No-op if already connected or connecting.
+manager.connect();
+
+// Gracefully close with code 1000. Stops reconnection.
+manager.disconnect();
+
+// Tear down and immediately reconnect from scratch.
+// Drops in-flight messages and clears pending subscriptions.
+manager.forceReconnect();
+
+// Permanently shut down. Clears all state and subscriptions.
+// The instance cannot be reused after this.
+manager.dispose();`}
+			language="tsx"
+			filename="lifecycle.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="send()">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Send a message to the server. Returns <code class="text-accent font-mono text-sm">false</code> if
+			not connected. The <code class="text-accent font-mono text-sm">onSendIntent</code> callback fires
+			regardless of connection state.
+		</p>
+		<CodeBlock
+			code={`const sent = manager.send({
+  data: { action: "message", id: "abc", channel: "general", text: "hello" },
+
+  // Optional: track this message as in-flight until acknowledged
+  ackId: "abc",
+
+  // Optional: arbitrary metadata (not sent over the wire)
+  meta: { optimistic: true },
+});`}
+			language="tsx"
+			filename="send.ts"
+		/>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			When an <code class="text-accent font-mono text-sm">ackId</code> is provided and the send succeeds,
+			the message is tracked as in-flight.
+			See <a href="/docs/optimistic-updates" class="text-accent hover:underline">Optimistic Updates</a>.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Subscriptions">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Ref-counted subscription management.
+			See the <a href="/docs/subscriptions" class="text-accent hover:underline">Subscriptions</a> guide for a full walkthrough.
+		</p>
+		<CodeBlock
+			code={`// Subscribe to a channel. Sends a message on first subscriber.
+manager.subscribe("chat:general", { action: "subscribe", type: "channel", channel: "general" });
+
+// Unsubscribe. Only sends when the last subscriber leaves.
+manager.unsubscribe("chat:general", { action: "unsubscribe", type: "channel", channel: "general" });
+
+// Check how many active subscribers a key has
+manager.getRefCount("chat:general"); // number
+
+// Get all subscription ref counts
+manager.getSubscriptionRefCounts(); // ReadonlyMap<string, number>
+
+// Get the data payload stored for each subscription key
+manager.getSubscriptionData(); // ReadonlyMap<string, TClientMsg | undefined>
+
+// Get keys that were sent but not yet confirmed by the server
+manager.getPendingSubscriptions(); // ReadonlySet<string>
+
+// Mark a pending subscription as confirmed
+manager.resolvePendingSubscription("chat:general");`}
+			language="tsx"
+			filename="subscriptions.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="In-Flight Tracking">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Messages sent with an <code class="text-accent font-mono text-sm">ackId</code> are tracked until
+			acknowledged or dropped.
+			See <a href="/docs/optimistic-updates" class="text-accent hover:underline">Optimistic Updates</a>.
+		</p>
+		<CodeBlock
+			code={`// Acknowledge a message (removes it from in-flight)
+manager.ackInFlight("abc");
+
+// Inspect all currently in-flight messages
+manager.getInFlightMessages(); // ReadonlyMap<string, TClientMsg>`}
+			language="tsx"
+			filename="in-flight.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="State Queries">
+		<CodeBlock
+			code={`// Current connection state
+manager.getConnectionState();
+// "disconnected" | "connecting" | "connected" | "reconnecting"
+
+// Current reconnect attempt number (resets to 0 on success)
+manager.getReconnectAttempt(); // number
+
+// Whether dispose() has been called
+manager.isDisposed(); // boolean
+
+// Whether the last close was intentional (via disconnect())
+manager.isIntentionalClose(); // boolean
+
+// WebSocket sub-protocols
+manager.getProtocols(); // readonly string[]`}
+			language="tsx"
+			filename="state.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Observers">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Subscribe to state changes and debug events. Both return an unsubscribe function.
+		</p>
+		<CodeBlock
+			code={`// React to connection state changes
+const unsub = manager.subscribeToConnectionState(() => {
+  console.log(manager.getConnectionState());
+});
+
+// Listen to all internal debug events
+const unsubDebug = manager.addDebugListener((event) => {
+  console.log(event.type, event);
+});
+
+// Clean up
+unsub();
+unsubDebug();`}
+			language="tsx"
+			filename="observers.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Protocols">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Add WebSocket sub-protocols before connecting. These are passed as the second
+			argument to the underlying <code class="text-accent font-mono text-sm">WebSocket</code> constructor.
+		</p>
+		<CodeBlock
+			code={`manager.addProtocols(["graphql-ws"]);
+manager.connect();`}
+			language="tsx"
+			filename="protocols.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="useConnectionState">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			A React hook that returns the current connection state. Built on
+			<code class="text-accent font-mono text-sm">useSyncExternalStore</code> so it is safe for
+			concurrent rendering.
+		</p>
+		<CodeBlock
+			code={`import { useConnectionState } from "@luciodale/react-socket";
+
+function StatusBadge() {
+  const state = useConnectionState(manager);
+  // "disconnected" | "connecting" | "connected" | "reconnecting"
+  return <span>{state}</span>;
+}`}
+			language="tsx"
+			filename="StatusBadge.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="createLocalStorage">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			A helper that wraps <code class="text-accent font-mono text-sm">window.localStorage</code> behind the
+			async <code class="text-accent font-mono text-sm">IStorage</code> interface. All operations are
+			wrapped in try/catch so they fail silently when storage is unavailable.
+		</p>
+		<CodeBlock
+			code={`import { createLocalStorage } from "@luciodale/react-socket";
+
+const storage = createLocalStorage();`}
+			language="tsx"
+			filename="storage.ts"
+		/>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			Used as input to <code class="text-accent font-mono text-sm">createUndeliveredSync</code>.
+			See <a href="/docs/undelivered-sync" class="text-accent hover:underline">Undelivered Sync</a>.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="createUndeliveredSync">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Creates a persistent store for messages that haven't been delivered yet.
+			See the <a href="/docs/undelivered-sync" class="text-accent hover:underline">Undelivered Sync</a> guide
+			for a full walkthrough.
+		</p>
+		<CodeBlock
+			code={`import { createUndeliveredSync, createLocalStorage } from "@luciodale/react-socket";
+
+const undelivered = createUndeliveredSync<TClientMsg>({
+  storage: createLocalStorage(),
+  storageKey: "ws_undelivered_messages", // optional, this is the default
+});
+
+await undelivered.init();`}
+			language="tsx"
+			filename="undelivered.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Types">
+		<CodeBlock
+			code={`import type {
+  // Connection state union
+  TConnectionState,
+  // "disconnected" | "connecting" | "connected" | "reconnecting"
+
+  // Constructor options
+  TManagerConfig,
+
+  // Argument to send()
+  TSendParams,
+
+  // Debug event (id + timestamp + payload)
+  TDebugEvent,
+
+  // The payload portion of a debug event
+  TDebugEventPayload,
+
+  // Union of all debug event type strings
+  TDebugEventType,
+
+  // WebSocket transport interface (for custom transports)
+  IWebSocketTransport,
+
+  // Async storage interface (for undelivered sync)
+  IStorage,
+
+  // Return type of createUndeliveredSync
+  TUndeliveredSync,
+} from "@luciodale/react-socket";`}
+			language="tsx"
+			filename="types.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Debug Event Types">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Every debug event has an <code class="text-accent font-mono text-sm">id</code>,
+			<code class="text-accent font-mono text-sm">timestamp</code>, and a
+			<code class="text-accent font-mono text-sm">type</code> discriminator. Here are all possible types:
+		</p>
+		<CodeBlock
+			code={`| Type                          | Payload                              |
+|-------------------------------|--------------------------------------|
+| connection-state-change       | { from, to }                         |
+| message-received              | { raw, deserialized, isPong }        |
+| message-sent                  | { ackId?, raw, deserialized }        |
+| subscribe                     | { key, refCount, raw?, deserialized? } |
+| unsubscribe                   | { key, refCount, raw?, deserialized? } |
+| in-flight-ack                 | { ackId }                            |
+| in-flight-drop                | { ids }                              |
+| pending-subscription-resolved | { key }                              |
+| reconnect-scheduled           | { attempt, delayMs }                 |
+| ready                         | { restoredKeys }                     |
+| deserialize-error             | { raw, error }                       |
+| dispose                       | —                                    |`}
+			language="text"
+			filename="debug-events"
+		/>
+	</ContentSection>
+</DocsPage>

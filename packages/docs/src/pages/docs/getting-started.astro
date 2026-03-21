@@ -1,0 +1,381 @@
+---
+import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import PackageInfo from "@luciodale/docs-ui-kit/components/PackageInfo.astro";
+import DocsPage from "../../layouts/DocsPage.astro";
+
+export const prerender = true;
+---
+
+<DocsPage
+	title="Getting Started"
+	description="Install and set up react-socket, a TypeScript-first WebSocket manager for React."
+>
+	<ContentSection label="What is react-socket?">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			WebSockets look easy until you actually build with them. The initial
+			<code class="text-accent font-mono text-sm">new WebSocket(url)</code
+			> takes five minutes. Then you spend the next week wiring up reconnection
+			logic, figuring out why your subscriptions vanish after a dropped connection,
+			deduplicating messages when three components all subscribe to the same
+			channel, and tracking which sends actually made it to the server. All
+			of this ends up scattered across hooks, effects, and refs until the whole
+			thing becomes a maintenance problem.
+		</p>
+		<p class="text-white/60 leading-relaxed">
+			react-socket takes that entire layer off your plate. You define your
+			message types, wire up a few callbacks, and the library handles the
+			socket lifecycle, reconnection, keep-alive, subscription management,
+			and in-flight tracking. Your code stays focused on application
+			logic. The socket plumbing just works.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Rationale">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Most WebSocket libraries fall into two camps. The heavy ones give
+			you an opinionated protocol, built-in state management, and
+			abstractions you end up fighting against the moment your use case
+			doesn't fit their mold. The thin ones hand you a WebSocket wrapper
+			and leave every hard problem on your plate: reconnection,
+			subscription deduplication, delivery tracking, message routing. You
+			still write all the same boilerplate.
+		</p>
+		<p class="text-white/60 mb-4 leading-relaxed">
+			react-socket sits in the space between. It's an <strong
+				class="text-white/80">orchestrator</strong
+			>, not a framework. It manages the transport concerns that are
+			genuinely painful to get right, and gets out of the way for
+			everything else. Your protocol. Your state management. Your
+			serialization format. The library doesn't make decisions it can't
+			reverse.
+		</p>
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Here's what you get for free:
+		</p>
+		<ul class="list-disc list-inside space-y-2 text-white/60 mb-4">
+			<li>
+				<strong class="text-white/80">Automatic reconnection</strong> with
+				exponential backoff and jitter. Subscriptions are restored transparently
+				after every reconnect.
+			</li>
+			<li>
+				<strong class="text-white/80"
+					>Subscription deduplication.</strong
+				> Ten components can subscribe to the same channel and only one message
+				goes to the server. The library ref-counts internally. When the last
+				component unmounts, the unsubscribe fires automatically.
+			</li>
+			<li>
+				<strong class="text-white/80"
+					>In-flight message tracking.</strong
+				> Send a message with an ack ID, track it as pending, and know exactly
+				when the server confirmed it or when it was dropped.
+			</li>
+			<li>
+				<strong class="text-white/80">Keep-alive pings</strong> so proxies
+				and load balancers don't kill idle connections.
+			</li>
+			<li>
+				<strong class="text-white/80">First-class TypeScript.</strong> Your
+				client and server message types flow through every callback, every
+				<code class="text-accent font-mono text-sm">send()</code>, every
+				received message. Protocol mismatches are caught at compile
+				time, not in production.
+			</li>
+		</ul>
+		<p class="text-white/60 leading-relaxed">
+			And here's what you stay in control of: your message format, your
+			state management, your routing logic, your UI. react-socket doesn't
+			render anything, doesn't touch your store, and doesn't assume your
+			protocol. It keeps the socket lifecycle organized and predictable.
+			You write the business logic.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Installation">
+		<CodeBlock
+			code="npm install @luciodale/react-socket"
+			language="bash"
+			filename="terminal"
+		/>
+		<PackageInfo
+			packageName="@luciodale/react-socket"
+			githubRepo="luciodale/react-socket"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Quick Start">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			The simplest way to use react-socket. Create a manager in a
+			<code class="text-accent font-mono text-sm">useMemo</code>, store
+			the response in
+			<code class="text-accent font-mono text-sm">useState</code>, fire a
+			message, done. Everything lives in a single component:
+		</p>
+		<CodeBlock
+			code={`import { useMemo, useState } from "react";
+import { WebSocketManager } from "@luciodale/react-socket";
+
+type TClientMsg = { action: "echo"; text: string };
+type TServerMsg = { action: "echo"; text: string };
+
+function EchoDemo() {
+  const [response, setResponse] = useState<string | null>(null);
+
+  const manager = useMemo(() => {
+    const m = new WebSocketManager<TClientMsg, TServerMsg>({
+      url: "ws://localhost:3001/ws",
+      serialize: (msg) => JSON.stringify(msg),
+      deserialize: (raw) => JSON.parse(raw),
+
+      onMessageReceived(msg) {
+        setResponse(msg.text);
+      },
+    });
+    m.connect();
+    return m;
+  }, []);
+
+  return (
+    <div>
+      <button onClick={() => manager.send({ data: { action: "echo", text: "hello" } })}>
+        Send
+      </button>
+      {response && <p>Server said: {response}</p>}
+    </div>
+  );
+}`}
+			language="tsx"
+			filename="EchoDemo.tsx"
+		/>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			That's the whole thing. The manager handles the connection,
+			serialization, and message routing. You define what to send and what
+			to do when something comes back. Notice how
+			<code class="text-accent font-mono text-sm">TClientMsg</code> and
+			<code class="text-accent font-mono text-sm">TServerMsg</code> are fully
+			typed: if you change a field name or add a new message variant, TypeScript
+			tells you everywhere that needs updating.
+		</p>
+		<Callout type="tip" title="Lifecycle">
+			In a real app, call <code>manager.connect()</code> inside a <code
+				>useEffect</code
+			>
+			and return <code>manager.disconnect()</code> as cleanup. The quick start
+			above inlines it in <code>useMemo</code> for brevity.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Subscriptions: One Message, Many Readers">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Subscriptions are the core pattern for real-time data. You send a
+			message to the server saying "I want updates on this topic," and the
+			server pushes data back over time. The powerful part: if five
+			components subscribe to the same channel, only one message goes to
+			the server. The library ref-counts internally and all components
+			read from the same store, updated by a single <code
+				class="text-accent font-mono text-sm">onMessageReceived</code
+			> callback.
+		</p>
+		<CodeBlock
+			code={`import { useEffect } from "react";
+
+function PriceTracker({ ticker }: { ticker: string }) {
+  useEffect(() => {
+    manager.subscribe(
+      \`prices:\${ticker}\`,
+      { action: "subscribe", channel: ticker }
+    );
+    return () => {
+      manager.unsubscribe(
+        \`prices:\${ticker}\`,
+        { action: "unsubscribe", channel: ticker }
+      );
+    };
+  }, [ticker]);
+
+  const price = useStore((s) => s.prices[ticker]);
+  return <span>{price}</span>;
+}
+
+// Render this 10 times with the same ticker.
+// One subscribe message hits the server. All 10 components stay in sync.`}
+			language="tsx"
+			filename="PriceTracker.tsx"
+		/>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			No duplicate messages, no leaked subscriptions, no manual
+			bookkeeping. When the connection drops and comes back, the library
+			automatically re-subscribes to every active channel using the stored
+			payload. Your components don't even notice.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Fire and Forget vs. Acknowledged Sends">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			react-socket supports two sending patterns, and you pick per
+			message:
+		</p>
+		<p class="text-white/60 mb-4 leading-relaxed">
+			<strong class="text-white/80">Fire and forget</strong> is the simple case.
+			You send a message and move on. No tracking, no confirmation. Great for
+			cursor positions, typing indicators, or anything where a lost message
+			doesn't matter because the next one is already on the way.
+		</p>
+		<CodeBlock
+			code={`// Fire and forget: send and move on
+manager.send({ data: { action: "cursor_move", x: 100, y: 200 } });`}
+			language="tsx"
+			filename="fire-and-forget.ts"
+		/>
+		<p class="text-white/60 mb-4 mt-4 leading-relaxed">
+			<strong class="text-white/80">Acknowledged sends</strong> are for when
+			delivery matters. You include an <code
+				class="text-accent font-mono text-sm">ackId</code
+			> and the library tracks the message as "in-flight" until the server echoes
+			it back. The key: the server must include the same ID in its response
+			so the library can match the confirmation to the original send.
+		</p>
+		<CodeBlock
+			code={`// Acknowledged send: track until the server confirms
+const id = crypto.randomUUID();
+
+manager.send({
+  data: { action: "message", id, channel: "general", text: "hello" },
+  ackId: id,
+});
+
+// Later, when the server echoes the message back:
+onMessageReceived(msg) {
+  if (msg.action === "message") {
+    manager.ackInFlight(msg.id); // removes from in-flight tracking
+  }
+}`}
+			language="tsx"
+			filename="acknowledged-send.ts"
+		/>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			The <code class="text-accent font-mono text-sm">onSendIntent</code> callback
+			fires on every
+			<code class="text-accent font-mono text-sm">send()</code>, even when
+			offline. This is where you do optimistic UI updates: add the message
+			to your store immediately, then confirm or roll back when the server
+			responds. If the connection drops while messages are in-flight,
+			<code class="text-accent font-mono text-sm">onInFlightDrop</code> fires
+			so you can mark them as failed or save them for retry.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Callbacks as Dispatchers">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			The idea is simple: you use the manager's callbacks as dispatchers
+			and organize your logic in blocks based on the message types you
+			receive. Instead of scattering WebSocket handling across components,
+			everything routes through one place. Like a reducer, but for your
+			socket:
+		</p>
+		<CodeBlock
+			code={`const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  url: "wss://api.example.com/ws",
+  serialize: (msg) => JSON.stringify(msg),
+  deserialize: (raw) => JSON.parse(raw),
+
+  onMessageReceived(msg) {
+    switch (msg.action) {
+      case "echo":
+        handleEcho(msg);
+        break;
+      case "subscribe_ack":
+        manager.resolvePendingSubscription(\`chat:\${msg.channel}\`);
+        break;
+      case "message":
+        manager.ackInFlight(msg.id);
+        handleChatMessage(msg);
+        break;
+    }
+  },
+
+  onSendIntent({ data, ackId }) {
+    if (data.action === "message" && ackId) {
+      addOptimisticMessage(data, ackId);
+    }
+  },
+});`}
+			language="tsx"
+			filename="manager.ts"
+		/>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			The library isn't trying to be magic. It's an orchestrator that
+			keeps things organized and functional. You write the logic, the
+			manager makes sure it fires at the right time with the right data,
+			fully typed.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="TypeScript All the Way Down">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			This is not TypeScript as an afterthought. Your
+			<code class="text-accent font-mono text-sm">TClientMsg</code> and
+			<code class="text-accent font-mono text-sm">TServerMsg</code> types are
+			the single source of truth for your entire WebSocket protocol. They flow
+			through the constructor, every callback, <code
+				class="text-accent font-mono text-sm">send()</code
+			>,
+			<code class="text-accent font-mono text-sm">serialize</code>,
+			<code class="text-accent font-mono text-sm">deserialize</code>, and
+			subscription payloads.
+		</p>
+		<CodeBlock
+			code={`// These union types define your protocol.
+// Change a field here and TypeScript flags every callsite.
+
+type TClientMsg =
+  | { action: "echo"; text: string }
+  | { action: "subscribe"; channel: string }
+  | { action: "message"; id: string; channel: string; text: string };
+
+type TServerMsg =
+  | { action: "echo"; text: string }
+  | { action: "subscribe_ack"; channel: string }
+  | { action: "message"; id: string; channel: string; sender: string; text: string };`}
+			language="tsx"
+			filename="types.ts"
+		/>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			As your protocol grows, these types keep everything in sync across
+			the entire codebase. Add a new message variant, rename a field,
+			change a payload shape: the compiler tells you what broke before you
+			ever run the code.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Next Steps">
+		<ul class="space-y-2 text-white/60">
+			<li>
+				<a
+					href="/docs/configuration"
+					class="text-accent hover:underline">Configuration</a
+				> — all manager options in detail
+			</li>
+			<li>
+				<a
+					href="/docs/subscriptions"
+					class="text-accent hover:underline">Subscriptions</a
+				> — channels with automatic deduplication
+			</li>
+			<li>
+				<a
+					href="/docs/optimistic-updates"
+					class="text-accent hover:underline">Sending Messages</a
+				> — fire-and-forget and acknowledged sends
+			</li>
+			<li>
+				<a href="/docs/api" class="text-accent hover:underline"
+					>API Reference</a
+				> — every method and type
+			</li>
+		</ul>
+	</ContentSection>
+</DocsPage>
