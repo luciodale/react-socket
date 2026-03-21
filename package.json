@@ -27,7 +27,7 @@
     "build": "bun run build:lib && bun run build:docs",
     "build:lib": "tsc && vite build -c vite.lib.config.mts",
     "build:docs": "bun run --filter react-socket-docs build",
-    "deploy:docs": "bun run --filter react-socket-docs deploy",
+    "deploy:docs": "cd packages/docs && npx wrangler deploy",
     "npm": "bun run build:lib && cd packages/library && npm publish --access public",
     "npm:test": "bun run build:lib && cd packages/library && npm pack --dry-run",
     "format": "biome format --write .",
