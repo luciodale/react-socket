@@ -26,7 +26,7 @@
     "dev:server": "bun run --filter react-socket-docs dev:server",
     "build": "bun run build:lib && bun run build:docs",
     "build:lib": "tsc && vite build -c vite.lib.config.mts",
-    "build:docs": "bun run --filter react-socket-docs build",
+    "build:docs": "bun run --filter react-socket-docs build && cp packages/docs/public/.assetsignore packages/docs/dist/.assetsignore",
     "deploy:docs": "cd packages/docs && npx wrangler deploy",
     "npm": "bun run build:lib && cd packages/library && npm publish --access public",
     "npm:test": "bun run build:lib && cd packages/library && npm pack --dry-run",
