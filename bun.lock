@@ -4,6 +4,9 @@
   "workspaces": {
     "": {
       "name": "react-socket-monorepo",
+      "dependencies": {
+        "@luciodale/docs-ui-kit": "^0.3.2",
+      },
       "devDependencies": {
         "@biomejs/biome": "2.3.14",
         "@testing-library/jest-dom": "^6.9.1",
@@ -28,7 +31,7 @@
         "@astrojs/cloudflare": "^12.0.0",
         "@astrojs/react": "^4.0.0",
         "@astrojs/sitemap": "^3.7.1",
-        "@luciodale/docs-ui-kit": "0.3.1",
+        "@luciodale/docs-ui-kit": "^0.3.2",
         "@luciodale/react-socket": "workspace:*",
         "@tailwindcss/vite": "^4.1.18",
         "astro": "^5.0.0",
@@ -290,7 +293,7 @@
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
-    "@luciodale/docs-ui-kit": ["@luciodale/docs-ui-kit@0.3.1", "", { "dependencies": { "shiki": "^4.0.2" }, "peerDependencies": { "astro": ">=5" } }, "sha512-xv3vgTJUbZ1ZYySPc1G+Kz1KuZR3IsXpDyG951sjS9zpCwZj99qpC1gUfCXCzNLRmp4o2tz790xwnO7wWfG/Wg=="],
+    "@luciodale/docs-ui-kit": ["@luciodale/docs-ui-kit@0.3.2", "", { "dependencies": { "shiki": "^4.0.2" }, "peerDependencies": { "astro": ">=5" } }, "sha512-odsH6XGJyjC6gvsvGAJVZ5TSOh22tJ01YSILaBv4xjWrXVnwfoX1V0UZaK3mdVoZqseG7i7lxdS/FBKcx1mkIg=="],
 
     "@luciodale/react-socket": ["@luciodale/react-socket@workspace:packages/library"],
 
