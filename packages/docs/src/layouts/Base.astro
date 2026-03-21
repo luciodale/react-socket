@@ -2,6 +2,7 @@
 import SEO from "@luciodale/docs-ui-kit/components/SEO.astro";
 import { siteConfig } from "../config";
 import { href } from "../lib/link";
+import "../styles/global.css";
 
 type Props = {
 	title: string;
@@ -36,7 +37,3 @@ const currentPath = Astro.url.pathname;
 		<slot />
 	</body>
 </html>
-
-<style is:global>
-	@import "../styles/global.css";
-</style>
