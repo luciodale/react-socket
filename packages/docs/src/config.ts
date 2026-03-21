@@ -5,6 +5,8 @@ export const siteConfig: SiteConfig = {
 	description:
 		"A TypeScript-first WebSocket manager for React. Handles the socket plumbing you don't want to build: reconnection, deduped subscriptions, in-flight tracking, and keep-alive. Your protocol, your state management, your rules.",
 	siteUrl: "https://react-socket-docs.pages.dev",
+	logoSrc: "/projects/react-socket/logo.svg",
+	logoAlt: "react-socket logo",
 	installCommand: "npm install @luciodale/react-socket",
 	githubUrl: "https://github.com/luciodale/react-socket",
 	author: "Lucio D'Alessandro",
