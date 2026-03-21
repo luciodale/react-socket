@@ -80,7 +80,7 @@ export const GET: APIRoute = async ({ request }) => {
 	const [client, server] = Object.values(pair);
 
 	server.accept();
-	server.addEventListener("message", (event) => {
+	server.addEventListener("message", (event: MessageEvent) => {
 		try {
 			const msg = JSON.parse(event.data as string) as TClientMsg;
 			handleMessage(server, msg);

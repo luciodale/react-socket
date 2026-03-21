@@ -37,7 +37,7 @@ function formatEventSummary<TClientMsg, TServerMsg>(
 		case "unsubscribe":
 			return `${e.key} (ref: ${e.refCount})`;
 		case "in-flight-ack":
-			return e.messageId;
+			return e.ackId;
 		case "in-flight-drop":
 			return `${e.ids.length} message(s)`;
 		case "pending-subscription-resolved":
