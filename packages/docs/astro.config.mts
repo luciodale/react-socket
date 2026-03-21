@@ -12,5 +12,10 @@ export default defineConfig({
 	integrations: [react(), sitemap()],
 	vite: {
 		plugins: [tailwindcss()],
+		ssr: {
+			resolve: {
+				conditions: ["workerd", "worker", "browser"],
+			},
+		},
 	},
 });
