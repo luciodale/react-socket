@@ -40,5 +40,8 @@
   },
   "workspaces": [
     "packages/*"
-  ]
+  ],
+  "dependencies": {
+    "@luciodale/docs-ui-kit": "^0.3.37"
+  }
 }
