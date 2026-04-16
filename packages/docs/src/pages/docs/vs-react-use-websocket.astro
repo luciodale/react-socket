@@ -1,0 +1,224 @@
+---
+import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import Comparison from "@luciodale/docs-ui-kit/components/Comparison.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
+import DocsPage from "../../layouts/DocsPage.astro";
+import { href } from "../../lib/link";
+
+export const prerender = true;
+---
+
+<DocsPage
+	title="react-socket vs react-use-websocket"
+	description="How react-socket compares to react-use-websocket. Honest trade-offs on type safety, subscriptions, in-flight tracking, and offline queuing for React WebSocket clients."
+>
+	<ContentSection label="The choice">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			<InlineCode>react-use-websocket</InlineCode> is the default pick when
+			you reach for a WebSocket hook in React. It wraps the browser
+			<InlineCode>WebSocket</InlineCode> API into a clean
+			<InlineCode>useWebSocket</InlineCode> hook, handles reconnection, and
+			exposes
+			<InlineCode>sendMessage</InlineCode> / <InlineCode>lastMessage</InlineCode>.
+			For simple realtime views it's more than enough.
+		</p>
+		<p class="text-white/60 leading-relaxed">
+			react-socket sits one floor up. It's still unopinionated about your
+			protocol or state, but it orchestrates the things you start to
+			hand-roll the moment your app gets real: typed messages, ref counted
+			subscriptions shared across components, in-flight tracking with ack
+			IDs, offline queuing, and a dev inspector. If you're building a chat
+			room, a trading UI, or a streaming LLM client, that's where the
+			boilerplate eats weeks.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Where each one sits">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Libraries that do <em>less</em> than react-socket leave you to
+			implement subscription dedup, in-flight tracking, offline replay, and
+			type propagation yourself. Libraries that do <em>more</em> pick a
+			protocol (STOMP, GraphQL subscriptions, Phoenix Channels) and lock
+			you to it.
+		</p>
+		<p class="text-white/60 leading-relaxed">
+			react-use-websocket sits firmly in the "less" camp: a thin, friendly
+			hook around the browser primitive. react-socket stays
+			protocol-agnostic but handles the transport plumbing around the
+			socket, so your app code stays focused on what the messages
+			<em>mean</em>, not how they arrive.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Feature by feature">
+		<Comparison
+			columns={[
+				{
+					name: "@luciodale/react-socket",
+					href: "https://www.npmjs.com/package/@luciodale/react-socket",
+					tagline: "Orchestrator, protocol agnostic",
+					highlight: true,
+				},
+				{
+					name: "react-use-websocket",
+					href: "https://www.npmjs.com/package/react-use-websocket",
+					tagline: "Thin hook around browser WebSocket",
+				},
+			]}
+			rows={[
+				{
+					feature: "Typed message schemas",
+					description:
+						"Client and server union types flow through send, receive, serialize, deserialize.",
+					values: ["yes", "no"],
+				},
+				{
+					feature: "Automatic reconnection",
+					description:
+						"Exponential backoff with jitter, configurable caps.",
+					values: ["yes", "yes"],
+				},
+				{
+					feature: "Ref counted subscriptions",
+					description:
+						"Multiple components subscribe to the same channel with a single server message.",
+					values: ["yes", "no"],
+				},
+				{
+					feature: "In-flight tracking with ack IDs",
+					description:
+						"Tag a send, mark it pending, hear when the server confirms or when the connection drops before delivery.",
+					values: ["yes", "no"],
+				},
+				{
+					feature: "Offline message queue",
+					description:
+						"Sends while disconnected persist and flush on reconnect. Pluggable storage.",
+					values: ["yes", "no"],
+				},
+				{
+					feature: "Keep alive ping / pong",
+					description:
+						"Detects silent servers before the browser does and triggers a reconnect.",
+					values: ["yes", "partial"],
+				},
+				{
+					feature: "DevTools inspector",
+					description:
+						"Drop in component that visualizes traffic, subscriptions, and in-flight state.",
+					values: ["yes", "no"],
+				},
+				{
+					feature: "Pluggable transport",
+					description:
+						"Swap the browser WebSocket for any IWebSocketTransport. Useful for tests and non-browser runtimes.",
+					values: ["yes", "no"],
+				},
+				{
+					feature: "API shape",
+					values: [
+						{ text: "Manager class + hooks" },
+						{ text: "Single hook" },
+					],
+				},
+				{
+					feature: "Bundle size",
+					values: [{ text: "~5 kB gzipped" }, { text: "~3 kB gzipped" }],
+				},
+			]}
+			caption="Feature comparison between react-socket and react-use-websocket"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Type safety in practice">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			With react-use-websocket, <InlineCode>lastJsonMessage</InlineCode> is
+			<InlineCode>unknown</InlineCode> and <InlineCode>sendJsonMessage</InlineCode>
+			accepts any JSON-serializable value. You either cast everywhere or build a
+			wrapper that enforces your protocol. Fine for a toy, brittle for an app.
+		</p>
+		<CodeBlock
+			code={`// react-use-websocket: types stop at the hook boundary
+const { sendJsonMessage, lastJsonMessage } = useWebSocket(url);
+
+sendJsonMessage({ action: "ecoh", text: "hi" });  // typo compiles
+const msg = lastJsonMessage as ServerMsg;          // trust me bro`}
+			language="tsx"
+			filename="use-websocket.tsx"
+		/>
+		<p class="text-white/60 mb-4 mt-4 leading-relaxed">
+			With react-socket, <InlineCode>WebSocketManager&lt;TClientMsg, TServerMsg&gt;</InlineCode>
+			propagates your protocol through every callback. Rename a field and the compiler
+			lists the callsites that need to change.
+		</p>
+		<CodeBlock
+			code={`// react-socket: types flow end to end
+const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  url,
+  serialize: (msg) => JSON.stringify(msg),
+  deserialize: (raw) => JSON.parse(raw) as TServerMsg,
+  onMessageReceived(msg) {
+    // msg is TServerMsg, fully narrowed by switch on action
+  },
+});
+
+manager.send({ data: { action: "ecoh", text: "hi" } }); // compile error`}
+			language="tsx"
+			filename="react-socket.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Subscriptions without the bookkeeping">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Anything beyond a chat demo eventually needs many components reading
+			the same stream: ten price tickers for the same symbol, two avatars
+			and a header all watching the same presence channel. With a raw hook
+			you either lift state and share, or you accept that subscribes and
+			unsubscribes fire per mount, which floods the server.
+		</p>
+		<p class="text-white/60 leading-relaxed">
+			react-socket ref counts subscriptions by a stable key. The subscribe
+			payload goes out on the first mount. The unsubscribe fires on the
+			last unmount. Five components, one server message. Reconnect and
+			every active subscription restores itself without you writing any
+			code.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="When to pick react-use-websocket">
+		<Callout type="info" title="Pick it when">
+			You need a single socket, a single component, and the browser default
+			behavior is enough. Short-lived dashboards, toy demos, and features
+			where a dropped message or two doesn't matter. If your whole
+			WebSocket usage fits in one hook call, react-use-websocket is the
+			right size.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="When to pick react-socket">
+		<Callout type="tip" title="Pick it when">
+			You have a real protocol with multiple message types, components
+			sharing channels, sends that must survive a disconnect, or a chat or
+			trading or LLM streaming UX where dropped messages corrupt state.
+			Pick it when you've already written
+			<InlineCode>ref counted subscriptions</InlineCode> or <InlineCode>in-flight tracking</InlineCode>
+			by hand once and don't want to do it again.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Next steps">
+		<ul class="space-y-2 text-white/60">
+			<li>
+				<a href={href("/docs/getting-started")} class="text-accent hover:underline">Getting started</a> — install and wire up the manager
+			</li>
+			<li>
+				<a href={href("/docs/subscriptions")} class="text-accent hover:underline">Subscriptions</a> — how ref counting actually works
+			</li>
+			<li>
+				<a href={href("/docs/optimistic-updates")} class="text-accent hover:underline">Sending messages</a> — ack IDs and in-flight tracking
+			</li>
+		</ul>
+	</ContentSection>
+</DocsPage>

@@ -1,0 +1,253 @@
+---
+import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import Comparison from "@luciodale/docs-ui-kit/components/Comparison.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
+import DocsPage from "../../layouts/DocsPage.astro";
+import { href } from "../../lib/link";
+
+export const prerender = true;
+---
+
+<DocsPage
+	title="react-socket vs Socket.IO"
+	description="How react-socket compares to Socket.IO. Honest trade-offs on protocol lock in, transport fallback, typed events, React hooks, and bundle size for realtime apps."
+>
+	<ContentSection label="The choice">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Socket.IO is the grown up of realtime JavaScript. Ten plus years of
+			production, server implementations in Node, Python, Go, Java, rooms,
+			namespaces, acknowledgements, middleware, and a fallback to HTTP
+			long polling when WebSockets are blocked. For teams that need
+			bulletproof connectivity through strict corporate proxies and a huge
+			backend ecosystem, it's still the default.
+		</p>
+		<p class="text-white/60 leading-relaxed">
+			react-socket is smaller, narrower, and transport agnostic on the
+			wire. It doesn't ship a protocol, it orchestrates the one you
+			already have. React hooks are first class, types flow end to end,
+			and the bundle stays modest. The real decision is whether you want
+			Socket.IO's server stack and its protocol lock in.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Where each one sits">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Socket.IO is a full realtime stack. Client, server, transport
+			negotiation, protocol, rooms, presence patterns. You buy into the
+			protocol on both ends and get a mature ecosystem.
+		</p>
+		<p class="text-white/60 leading-relaxed">
+			react-socket is a client-side orchestrator. It doesn't care what
+			your server speaks as long as you can serialize to and from it. If
+			you already have a custom WebSocket backend (FastAPI, Elixir,
+			Cloudflare Durable Objects, Bun), react-socket slots in without
+			changing the server.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Feature by feature">
+		<Comparison
+			columns={[
+				{
+					name: "@luciodale/react-socket",
+					href: "https://www.npmjs.com/package/@luciodale/react-socket",
+					tagline: "Transport agnostic, React native",
+					highlight: true,
+				},
+				{
+					name: "socket.io-client",
+					href: "https://www.npmjs.com/package/socket.io-client",
+					tagline: "Full realtime stack, client + server",
+				},
+			]}
+			rows={[
+				{
+					feature: "Works with any WebSocket backend",
+					description:
+						"No protocol lock in. Bring any server that speaks WS.",
+					values: [
+						"yes",
+						{ text: "Server must speak Socket.IO" },
+					],
+				},
+				{
+					feature: "HTTP long polling fallback",
+					description:
+						"Automatic downgrade when WebSocket is blocked by proxies.",
+					values: ["no", "yes"],
+				},
+				{
+					feature: "Server ecosystem",
+					values: [
+						{ text: "Any WS server" },
+						{ text: "Node, Python, Go, Java, C++, etc." },
+					],
+				},
+				{
+					feature: "React hooks out of the box",
+					values: ["yes", "no"],
+				},
+				{
+					feature: "Typed message schemas (single generic)",
+					description:
+						"One pair of client / server union types flows through every callback.",
+					values: [
+						"yes",
+						{ text: "EventsMap, more ceremony" },
+					],
+				},
+				{
+					feature: "Ref counted subscriptions",
+					description:
+						"Many components share a single subscribe message.",
+					values: ["yes", "partial"],
+				},
+				{
+					feature: "Acknowledgements / in-flight tracking",
+					values: ["yes", "yes"],
+				},
+				{
+					feature: "Automatic reconnection",
+					values: ["yes", "yes"],
+				},
+				{
+					feature: "Offline message queue",
+					values: [
+						"yes",
+						{ text: "Volatile + reliable events" },
+					],
+				},
+				{
+					feature: "DevTools inspector",
+					values: [
+						{ text: "InspectorPanel component" },
+						{ text: "Admin UI (separate)" },
+					],
+				},
+				{
+					feature: "Bundle size (client, min+gz)",
+					values: [{ text: "~5 kB" }, { text: "~11 kB" }],
+				},
+				{
+					feature: "Track record",
+					values: [
+						{ text: "Young, narrower scope" },
+						{ text: "10+ years, massive adoption" },
+					],
+				},
+			]}
+			caption="Feature comparison between react-socket and socket.io-client"
+		/>
+	</ContentSection>
+
+	<ContentSection label="The protocol question">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Socket.IO's big win is also its biggest constraint. Choosing
+			Socket.IO means your server has to speak Socket.IO's framing and
+			handshake. That's fine when you control the backend and want the
+			batteries included. It stops being fine when your server is already
+			streaming OpenAI WebSocket responses, consuming a Kraken trading
+			feed, or serving a custom binary protocol.
+		</p>
+		<p class="text-white/60 leading-relaxed">
+			react-socket stays neutral. You implement
+			<InlineCode>serialize</InlineCode> and
+			<InlineCode>deserialize</InlineCode> for whatever your server
+			speaks, and every other feature (reconnection, subscriptions,
+			acks, queue) layers on top.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Typed events, less ceremony">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Socket.IO supports TypeScript via
+			<InlineCode>Socket&lt;ServerToClientEvents, ClientToServerEvents&gt;</InlineCode>.
+			You declare an event map per direction and each <InlineCode>emit</InlineCode>
+			/ <InlineCode>on</InlineCode> infers its payload. It works, but it
+			scales by the number of event names, not the shape of your
+			protocol.
+		</p>
+		<CodeBlock
+			code={`// Socket.IO: two maps, one per direction, one entry per event
+interface ServerToClientEvents {
+  message: (msg: ChatMessage) => void;
+  price: (data: PricePayload) => void;
+}
+interface ClientToServerEvents {
+  send: (msg: ChatMessage, cb: (ok: boolean) => void) => void;
+  subscribe: (channel: string) => void;
+}
+
+const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io();
+socket.emit("send", msg, (ok) => { /* ... */ });`}
+			language="tsx"
+			filename="socket-io.ts"
+		/>
+		<p class="text-white/60 mb-4 mt-4 leading-relaxed">
+			react-socket models your protocol as two discriminated unions and
+			narrows automatically.
+		</p>
+		<CodeBlock
+			code={`// react-socket: two unions, discriminated by action
+type TClientMsg =
+  | { action: "send"; ackId: string; msg: ChatMessage }
+  | { action: "subscribe"; channel: string };
+type TServerMsg =
+  | { action: "message"; msg: ChatMessage }
+  | { action: "price"; data: PricePayload };
+
+new WebSocketManager<TClientMsg, TServerMsg>({ /* ... */ });`}
+			language="tsx"
+			filename="react-socket.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Long polling fallback">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			If your users sit behind corporate proxies that strip WebSocket
+			upgrades, Socket.IO is still the answer. Its transport negotiation
+			downgrades to HTTP long polling automatically, and you get
+			realtime-ish behavior without changing your app code.
+		</p>
+		<p class="text-white/60 leading-relaxed">
+			react-socket is WebSocket only. If long polling is a hard
+			requirement, pick Socket.IO.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="When to pick Socket.IO">
+		<Callout type="info" title="Pick it when">
+			You want a full realtime stack, client and server, with ten years
+			of production behind it. You need HTTP long polling fallback
+			through hostile proxies. Your backend team is happy to run the
+			Socket.IO server. Rooms, namespaces, and middleware match your
+			problem shape.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="When to pick react-socket">
+		<Callout type="tip" title="Pick it when">
+			Your backend is custom (LLM WebSocket, trading feed, collab
+			server) and you can't or don't want to put Socket.IO in front of
+			it. You want first class React hooks, typed protocols, and
+			subscription deduplication without writing your own orchestration
+			layer. You care about bundle size.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Next steps">
+		<ul class="space-y-2 text-white/60">
+			<li>
+				<a href={href("/docs/vs-react-use-websocket")} class="text-accent hover:underline">vs react-use-websocket</a> — if you're comparing to the thin hook camp
+			</li>
+			<li>
+				<a href={href("/docs/getting-started")} class="text-accent hover:underline">Getting started</a> — install and wire up the manager
+			</li>
+			<li>
+				<a href={href("/docs/subscriptions")} class="text-accent hover:underline">Subscriptions</a> — how ref counting actually works
+			</li>
+		</ul>
+	</ContentSection>
+</DocsPage>

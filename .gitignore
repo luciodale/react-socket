@@ -29,3 +29,6 @@ public/_pagefind
 *.njsproj
 *.sln
 *.sw?
+
+# Astro build cache
+packages/docs/.astro/

@@ -1,6 +1,6 @@
 {
 	"name": "@luciodale/react-socket",
-	"version": "0.0.3",
+	"version": "0.0.4",
 	"author": "Lucio D'Alessandro",
 	"repository": {
 		"type": "git",
@@ -21,18 +21,32 @@
 			"import": "./dist/react-socket-inspector.es.js"
 		}
 	},
-	"description": "Lightweight WebSocket manager for React with reconnection, subscriptions, and in-flight tracking.",
+	"description": "Type safe React hooks for real time WebSocket communication. Automatic reconnection, optimistic updates, ref counted subscriptions, and offline message queuing out of the box.",
+	"homepage": "https://koolcodez.com/projects/react-socket",
+	"bugs": {
+		"url": "https://github.com/luciodale/react-socket/issues"
+	},
 	"files": [
 		"dist",
 		"README.md"
 	],
 	"keywords": [
 		"react",
+		"typescript",
 		"websocket",
-		"socket",
+		"websockets",
+		"react-hooks",
+		"hooks",
+		"realtime",
 		"real-time",
 		"reconnection",
-		"subscriptions"
+		"optimistic-updates",
+		"offline-first",
+		"message-queue",
+		"streaming",
+		"type-safe",
+		"llm-streaming",
+		"ai-streaming"
 	],
 	"license": "MIT",
 	"types": "dist/index.d.ts"

@@ -5,7 +5,36 @@
 
   [Documentation](https://koolcodez.com/projects/react-socket) &nbsp;&middot;&nbsp; [NPM](https://www.npmjs.com/package/@luciodale/react-socket) &nbsp;&middot;&nbsp; [GitHub](https://github.com/luciodale/react-socket)
 
+  [![npm version](https://img.shields.io/npm/v/@luciodale/react-socket.svg)](https://www.npmjs.com/package/@luciodale/react-socket)
+  [![npm downloads](https://img.shields.io/npm/dm/@luciodale/react-socket.svg)](https://www.npmjs.com/package/@luciodale/react-socket)
+  [![bundle size](https://img.shields.io/bundlephobia/minzip/@luciodale/react-socket)](https://bundlephobia.com/package/@luciodale/react-socket)
+  [![license](https://img.shields.io/npm/l/@luciodale/react-socket.svg)](./LICENSE)
+
 </div>
+
+## Why react-socket
+
+Coming from `react-use-websocket` or a raw `useEffect(() => new WebSocket(...))`, these are the things you stop writing by hand:
+
+- **Typed message schemas.** Client and server union types flow through `send`, `serialize`, `deserialize`, and every callback. No `any`, no casts.
+- **Ref counted subscriptions.** Five components can subscribe to the same channel. One subscribe message hits the server. The unsubscribe fires on the last unmount.
+- **In-flight tracking.** Tag a send with an `ackId`. Know when the server confirms, or when the connection drops before delivery.
+- **Offline message queue.** Sends made while disconnected persist to storage and flush on reconnect.
+- **Reconnection with backoff.** Exponential backoff with jitter, subscriptions restore themselves.
+- **DevTools inspector.** A drop in component that shows traffic, subscription ref counts, and in-flight state in real time.
+
+Built for streaming LLM clients, realtime trading UIs, chat, presence, and agentic workflows.
+
+> Full comparisons:
+> [vs react-use-websocket](https://koolcodez.com/projects/react-socket/docs/vs-react-use-websocket) (thin hook camp)
+> ·
+> [vs Socket.IO](https://koolcodez.com/projects/react-socket/docs/vs-socket-io) (same tier, different trade offs)
+
+## Requirements
+
+- React 16.8+ (hooks).
+- TypeScript 4.7+ recommended for full generic inference.
+- Modern evergreen browsers. Tested on Chrome 90+, Firefox 88+, Safari 14+, Edge 90+.
 
 ## Install
 

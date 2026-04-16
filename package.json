@@ -19,7 +19,7 @@
 		"vitest": "^4.0.18",
 		"zustand": "^5.0.11"
 	},
-	"description": "Lightweight WebSocket manager for React.",
+	"description": "Type safe React hooks for real time WebSocket communication. Automatic reconnection, optimistic updates, ref counted subscriptions, and offline message queuing out of the box.",
 	"license": "MIT",
 	"private": true,
 	"scripts": {

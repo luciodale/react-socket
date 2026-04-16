@@ -47,6 +47,16 @@ export const siteConfig: SiteConfig = {
 				{ href: "/demo/inspector", label: "Inspector" },
 			],
 		},
+		{
+			title: "Comparison",
+			links: [
+				{
+					href: "/docs/vs-react-use-websocket",
+					label: "vs react-use-websocket",
+				},
+				{ href: "/docs/vs-socket-io", label: "vs Socket.IO" },
+			],
+		},
 	],
 	copyright: "Lucio D'Alessandro",
 	parentSite: {
