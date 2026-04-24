@@ -32,6 +32,7 @@ export default defineConfig({
 			entry: {
 				"react-socket": "packages/library/src/index.ts",
 				"react-socket-inspector": "packages/library/src/inspector/index.ts",
+				"react-socket-testing": "packages/library/src/testing/index.ts",
 			},
 			formats: ["es"],
 			fileName: (_format, entryName) => `${entryName}.es.js`,

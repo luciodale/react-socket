@@ -49,7 +49,12 @@ function formatEventSummary<TClientMsg, TServerMsg>(
 				? `restored: ${e.restoredKeys.join(", ")}`
 				: "no subscriptions";
 		case "deserialize-error":
-			return truncate(e.raw, 60);
+			return truncate(
+				typeof e.raw === "string" ? e.raw : `[binary ${typeof e.raw}]`,
+				60,
+			);
+		case "url-resolve-error":
+			return String(e.error);
 		case "dispose":
 			return "";
 	}

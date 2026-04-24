@@ -1,0 +1,184 @@
+---
+import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
+import DocsPage from "../../layouts/DocsPage.astro";
+import { href } from "../../lib/link";
+
+export const prerender = true;
+
+// Code samples in frontmatter to dodge the astro/esbuild parser bug
+// with TS generics + escaped template literals.
+const arrayBufferSample = `import { WebSocketManager } from "@luciodale/react-socket";
+
+type TClientMsg = { type: "ping" } | { type: "frame"; bytes: number };
+type TServerMsg = { type: "pong" } | { type: "frame"; bytes: number };
+
+function encode(msg: TClientMsg): ArrayBuffer {
+  const json = JSON.stringify(msg);
+  const bytes = new TextEncoder().encode(json);
+  const ab = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(ab).set(bytes);
+  return ab;
+}
+
+function decode(raw: ArrayBuffer): TServerMsg {
+  return JSON.parse(new TextDecoder().decode(new Uint8Array(raw)));
+}
+
+const manager = new WebSocketManager<
+  TClientMsg,
+  TServerMsg,
+  "type",
+  ArrayBuffer,  // wire type sent
+  ArrayBuffer   // wire type received
+>({
+  url: "wss://api.example.com/ws",
+  binaryType: "arraybuffer",
+  serialize: encode,
+  deserialize: decode,
+});`;
+
+const blobSample = `// Blobs are easier when you receive larger frames you don't need to
+// process synchronously. The browser keeps the data on disk-or-memory
+// until you await blob.text() / blob.arrayBuffer().
+const manager = new WebSocketManager<
+  TClientMsg,
+  TServerMsg,
+  "type",
+  Blob,
+  Blob
+>({
+  url: getWsUrl(),
+  binaryType: "blob",
+  serialize: (msg) => new Blob([JSON.stringify(msg)]),
+  deserialize: (raw) => {
+    // For Blob deserialization you usually pre-fetch metadata or stream
+    // the body separately. Sync deserialization is awkward; consider
+    // arraybuffer mode unless you specifically need Blob semantics.
+    throw new Error("implement async pre-decode in your bridge component");
+  },
+});`;
+
+const mixedSample = `// String and binary on the same connection.
+const manager = new WebSocketManager<
+  TClientMsg,
+  TServerMsg,
+  "type",
+  string | ArrayBuffer,  // serialize can return either
+  string | ArrayBuffer   // deserialize must accept either
+>({
+  url: getWsUrl(),
+  binaryType: "arraybuffer",
+  serialize: (msg) =>
+    msg.type === "blob" ? encode(msg) : JSON.stringify(msg),
+  deserialize: (raw) =>
+    typeof raw === "string"
+      ? (JSON.parse(raw) as TServerMsg)
+      : decode(raw),
+});`;
+
+const msgpackSample = `import { encode, decode } from "@msgpack/msgpack";
+
+const manager = new WebSocketManager<
+  TClientMsg,
+  TServerMsg,
+  "type",
+  Uint8Array,    // msgpack returns Uint8Array
+  ArrayBuffer
+>({
+  url: getWsUrl(),
+  binaryType: "arraybuffer",
+  serialize: (msg) => encode(msg),
+  deserialize: (raw) => decode(new Uint8Array(raw)) as TServerMsg,
+});`;
+---
+
+<DocsPage title="Binary frames">
+	<ContentSection label="Binary frames">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Most apps send JSON over the wire. Some apps need binary: MessagePack
+			or protobuf for compact payloads, audio chunks, image tiles, anything
+			that benefits from skipping JSON parse cost. The manager treats the
+			wire type as a generic parameter, so binary mode is fully type-safe
+			and entirely opt-in.
+		</p>
+		<Callout type="tip" title="Default stays string">
+			You only pay the binary tax if you ask for it. Construct the manager
+			without <InlineCode>binaryType</InlineCode> and the wire type defaults
+			to <InlineCode>string</InlineCode>, exactly as before.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="ArrayBuffer round trip">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Set <InlineCode>binaryType: "arraybuffer"</InlineCode> and parameterize
+			the manager with the binary wire types. The library plumbs
+			<InlineCode>binaryType</InlineCode> into the underlying
+			<InlineCode>WebSocket</InlineCode> instance so incoming frames arrive
+			as <InlineCode>ArrayBuffer</InlineCode>.
+		</p>
+		<CodeBlock code={arrayBufferSample} language="tsx" filename="manager.ts" />
+	</ContentSection>
+
+	<ContentSection label="Blob mode">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Blob mode works the same way, but synchronous deserialization is
+			awkward because Blob → bytes is async. Most apps prefer
+			<InlineCode>arraybuffer</InlineCode> unless you specifically want the
+			browser to defer materializing the bytes.
+		</p>
+		<CodeBlock code={blobSample} language="tsx" filename="manager.ts" />
+	</ContentSection>
+
+	<ContentSection label="Mixed string + binary">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			A connection can carry both. Widen the wire generics to a union and
+			branch in <InlineCode>serialize</InlineCode> /
+			<InlineCode>deserialize</InlineCode>:
+		</p>
+		<CodeBlock code={mixedSample} language="tsx" filename="manager.ts" />
+	</ContentSection>
+
+	<ContentSection label="MessagePack example">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			A common reason to reach for binary is replacing JSON with MessagePack
+			or protobuf. The encode/decode functions slot directly into
+			<InlineCode>serialize</InlineCode> / <InlineCode>deserialize</InlineCode>:
+		</p>
+		<CodeBlock code={msgpackSample} language="tsx" filename="manager.ts" />
+	</ContentSection>
+
+	<ContentSection label="Things that still work">
+		<ul class="list-disc list-inside space-y-2 text-white/60">
+			<li>Discriminator narrowing on <InlineCode>useSocketEvent</InlineCode> works on the deserialized object, not the raw bytes.</li>
+			<li>Subscriptions, ping/pong, in-flight ack tracking, optimistic updates — everything operates on <InlineCode>TClientMsg</InlineCode> / <InlineCode>TServerMsg</InlineCode>, not the wire type.</li>
+			<li>Debug events expose the binary <InlineCode>raw</InlineCode> field, so the inspector still shows that a frame happened (even if it cannot pretty-print the bytes).</li>
+		</ul>
+	</ContentSection>
+
+	<ContentSection label="Testing binary">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			<InlineCode>MockTransport</InlineCode>'s <InlineCode>sentMessages</InlineCode>
+			holds the raw wire payload. For binary, assert against the
+			<InlineCode>ArrayBuffer</InlineCode> directly.
+			<InlineCode>lastSentParsed</InlineCode> only works for string payloads;
+			use a custom decoder in tests for binary frames.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Next steps">
+		<ul class="space-y-2 text-white/60">
+			<li>
+				<a href={href("/docs/configuration")} class="text-accent hover:underline">Configuration</a> — full list of manager options including <InlineCode>binaryType</InlineCode>
+			</li>
+			<li>
+				<a href={href("/docs/backpressure")} class="text-accent hover:underline">Backpressure</a> — batching high-frequency binary frames into a single render
+			</li>
+			<li>
+				<a href={href("/docs/testing")} class="text-accent hover:underline">Testing</a> — asserting against binary <InlineCode>sentMessages</InlineCode>
+			</li>
+		</ul>
+	</ContentSection>
+</DocsPage>

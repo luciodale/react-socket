@@ -1,4 +1,5 @@
 ---
+import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
 import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
 import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
 import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
@@ -9,229 +10,362 @@ export const prerender = true;
 ---
 
 <DocsPage title="API Reference">
-	<ContentSection label="API Reference">
-		<p class="text-white/60 mb-6 leading-relaxed">
-			Complete reference for all exports from <InlineCode>@luciodale/react-socket</InlineCode>.
+	<ContentSection label="API at a glance">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			react-socket exposes a single manager class and nine React hooks. Each
+			hook has one job. You never need to write a message switch, never touch
+			an internal lifecycle method from user code, never manually wire a
+			<InlineCode>useEffect</InlineCode> around a subscribe call.
+		</p>
+		<CodeBlock
+			code={`import {
+  // Construct once, usually module level
+  WebSocketManager,
+
+  // React to an incoming message of a given type
+  useSocketEvent,
+
+  // Like useSocketEvent but batches events and flushes every flushMs
+  useSocketEventBatch,
+
+  // Manage a server-side stream subscription lifecycle
+  useSocketSubscription,
+
+  // True while a subscribe is in flight
+  useSocketPendingSubscription,
+
+  // Typed send fn bound to the manager
+  useSocketSend,
+
+  // Fires on every send(), even when offline — optimistic UI
+  useSocketSendIntent,
+
+  // Fires when in-flight messages are dropped on disconnect
+  useSocketInFlightDrop,
+
+  // Fires after (re)connect, with the list of restored subscription keys
+  useSocketReady,
+
+  // Fires when the last subscriber for a key unsubscribes
+  useSocketLastUnsubscribe,
+
+  // Observable connection state
+  useSocketConnectionState,
+} from "@luciodale/react-socket";`}
+			language="tsx"
+			filename="imports.ts"
+		/>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			See <a href={href("/docs/patterns")} class="text-accent hover:underline">Patterns</a> for scenario driven examples.
 		</p>
 	</ContentSection>
 
 	<ContentSection label="WebSocketManager">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			The core class. Takes two generic type parameters for your outgoing and incoming
-			message shapes. See <a href={href("/docs/configuration")} class="text-accent hover:underline">Configuration</a> for
-			all constructor options.
+			The core class. Three generics: client message type, server message
+			type, and the discriminator key (defaults to
+			<InlineCode>"type"</InlineCode>). See <a href={href("/docs/configuration")} class="text-accent hover:underline">Configuration</a> for all config options.
 		</p>
 		<CodeBlock
 			code={`import { WebSocketManager } from "@luciodale/react-socket";
 
-const manager = new WebSocketManager<TClientMsg, TServerMsg>(config);`}
+type TClientMsg = { type: "echo"; text: string };
+type TServerMsg = { type: "echo"; text: string };
+
+const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  url: "wss://...",
+  serialize: (msg) => JSON.stringify(msg),
+  deserialize: (raw) => JSON.parse(raw) as TServerMsg,
+});`}
 			language="tsx"
 			filename="manager.ts"
 		/>
 	</ContentSection>
 
-	<ContentSection label="Connection Lifecycle">
+	<ContentSection label="Lifecycle">
 		<CodeBlock
 			code={`// Open the connection. No-op if already connected or connecting.
 manager.connect();
 
-// Gracefully close with code 1000. Stops reconnection.
+// Graceful close (code 1000). Stops reconnection.
 manager.disconnect();
 
-// Tear down and immediately reconnect from scratch.
-// Drops in-flight messages and clears pending subscriptions.
+// Tear down and reconnect from scratch.
 manager.forceReconnect();
 
-// Permanently shut down. Clears all state and subscriptions.
-// The instance cannot be reused after this.
+// Permanently shut down. Instance cannot be reused.
 manager.dispose();`}
 			language="tsx"
 			filename="lifecycle.ts"
 		/>
 	</ContentSection>
 
-	<ContentSection label="send()">
+	<ContentSection label="useSocketEvent">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Send a message to the server. Returns <InlineCode>false</InlineCode> if
-			not connected. The <InlineCode>onSendIntent</InlineCode> callback fires
-			regardless of connection state.
+			Subscribe a handler to one discriminator value. The message is narrowed
+			automatically via
+			<InlineCode>Extract&lt;TServerMsg, Record&lt;TKey, TValue&gt;&gt;</InlineCode>. Handler identity can change between renders without resubscribing.
 		</p>
 		<CodeBlock
-			code={`const sent = manager.send({
-  data: { action: "message", id: "abc", channel: "general", text: "hello" },
-
-  // Optional: track this message as in-flight until acknowledged
-  ackId: "abc",
-
-  // Optional: arbitrary metadata (not sent over the wire)
-  meta: { optimistic: true },
+			code={`useSocketEvent(manager, "notification", (msg) => {
+  // msg is narrowed to the "notification" variant of TServerMsg
+  toast(msg.title);
+  queryClient.invalidateQueries({ queryKey: ["inbox"] });
 });`}
 			language="tsx"
-			filename="send.ts"
+			filename="useSocketEvent.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="useSocketEventBatch">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Same narrowing as <InlineCode>useSocketEvent</InlineCode>, but buffers
+			matching events and flushes the batch on a fixed interval. Required for
+			high-frequency streams where per-event renders would tank the UI.
+			<InlineCode>flushMs</InlineCode> has no default — pick one. See the
+			<a href={href("/docs/backpressure")} class="text-accent hover:underline"> Backpressure</a> guide for picking values.
+		</p>
+		<CodeBlock
+			code={`useSocketEventBatch(
+  manager,
+  "tick",
+  (msgs) => setLatest((prev) => mergeTicks(prev, msgs)),
+  { flushMs: 100 },
+);`}
+			language="tsx"
+			filename="useSocketEventBatch.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="useSocketSubscription">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Owns the lifecycle of a ref counted subscription. Sends the
+			<InlineCode>subscribe</InlineCode> payload on mount and the
+			<InlineCode>unsubscribe</InlineCode> payload on unmount. Both are typed
+			against <InlineCode>TClientMsg</InlineCode>. The
+			<InlineCode>key</InlineCode> is the ref counted identifier the library
+			uses internally.
+		</p>
+		<CodeBlock
+			code={`useSocketSubscription(manager, {
+  key: roomId,
+  subscribe: { type: "subscribe", channel: roomId },
+  unsubscribe: { type: "unsubscribe", channel: roomId },
+});`}
+			language="tsx"
+			filename="useSocketSubscription.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="useSocketPendingSubscription">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Returns <InlineCode>true</InlineCode> while the subscribe has been sent
+			but the server has not yet confirmed via the
+			<InlineCode>getSubscriptionResolvedKey</InlineCode> extractor. Drives
+			"joining..." UI.
+		</p>
+		<CodeBlock
+			code={`const joining = useSocketPendingSubscription(manager, roomId);
+return <span>{joining ? "joining..." : "ready"}</span>;`}
+			language="tsx"
+			filename="useSocketPendingSubscription.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="useSocketSend">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Returns a stable <InlineCode>send</InlineCode> fn bound to the manager.
+			Positional signature: message first, optional ack id second. The
+			message is typed against <InlineCode>TClientMsg</InlineCode>.
+		</p>
+		<CodeBlock
+			code={`const { send } = useSocketSend(manager);
+
+function onSubmit(text: string) {
+  const id = crypto.randomUUID();
+  send({ type: "message", id, text }, id);
+}`}
+			language="tsx"
+			filename="useSocketSend.tsx"
 		/>
 		<p class="text-white/60 mt-4 leading-relaxed">
-			When an <InlineCode>ackId</InlineCode> is provided and the send succeeds,
-			the message is tracked as in-flight.
-			See <a href={href("/docs/optimistic-updates")} class="text-accent hover:underline">Optimistic Updates</a>.
+			For a disabled state based on connection status, compose with
+			<InlineCode>useSocketConnectionState</InlineCode> — deliberately kept
+			separate so components that do not need a disabled state do not
+			re render on every state transition.
 		</p>
 	</ContentSection>
 
-	<ContentSection label="Subscriptions">
+	<ContentSection label="useSocketSendIntent">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Ref-counted subscription management.
-			See the <a href={href("/docs/subscriptions")} class="text-accent hover:underline">Subscriptions</a> guide for a full walkthrough.
+			Fires on every <InlineCode>send()</InlineCode> call, before the wire
+			attempt, even when offline. The right place for optimistic UI insert.
+			Receives the full <InlineCode>TSendParams</InlineCode> (data + ackId +
+			meta).
 		</p>
 		<CodeBlock
-			code={`// Subscribe to a channel. Sends a message on first subscriber.
-manager.subscribe("chat:general", { action: "subscribe", type: "channel", channel: "general" });
-
-// Unsubscribe. Only sends when the last subscriber leaves.
-manager.unsubscribe("chat:general", { action: "unsubscribe", type: "channel", channel: "general" });
-
-// Check how many active subscribers a key has
-manager.getRefCount("chat:general"); // number
-
-// Get all subscription ref counts
-manager.getSubscriptionRefCounts(); // ReadonlyMap<string, number>
-
-// Get the data payload stored for each subscription key
-manager.getSubscriptionData(); // ReadonlyMap<string, TClientMsg | undefined>
-
-// Get keys that were sent but not yet confirmed by the server
-manager.getPendingSubscriptions(); // ReadonlySet<string>
-
-// Mark a pending subscription as confirmed
-manager.resolvePendingSubscription("chat:general");`}
+			code={`useSocketSendIntent(manager, (params) => {
+  if (params.data.type === "message" && params.ackId) {
+    useChatStore.getState().insertOptimistic(params.data, params.ackId);
+  }
+});`}
 			language="tsx"
-			filename="subscriptions.ts"
+			filename="useSocketSendIntent.tsx"
 		/>
 	</ContentSection>
 
-	<ContentSection label="In-Flight Tracking">
+	<ContentSection label="useSocketInFlightDrop">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Messages sent with an <InlineCode>ackId</InlineCode> are tracked until
-			acknowledged or dropped.
-			See <a href={href("/docs/optimistic-updates")} class="text-accent hover:underline">Optimistic Updates</a>.
+			Fires when a disconnect or forced reconnect clears messages that were
+			sent with an <InlineCode>ackId</InlineCode> but never acked. Use to
+			mark pending sends as failed or queue them for retry.
 		</p>
 		<CodeBlock
-			code={`// Acknowledge a message (removes it from in-flight)
-manager.ackInFlight("abc");
-
-// Inspect all currently in-flight messages
-manager.getInFlightMessages(); // ReadonlyMap<string, TClientMsg>`}
+			code={`useSocketInFlightDrop(manager, (messages) => {
+  for (const { id, data } of messages) {
+    useChatStore.getState().markFailed(id);
+  }
+});`}
 			language="tsx"
-			filename="in-flight.ts"
+			filename="useSocketInFlightDrop.tsx"
 		/>
 	</ContentSection>
 
-	<ContentSection label="State Queries">
-		<CodeBlock
-			code={`// Current connection state
-manager.getConnectionState();
-// "disconnected" | "connecting" | "connected" | "reconnecting"
-
-// Current reconnect attempt number (resets to 0 on success)
-manager.getReconnectAttempt(); // number
-
-// Whether dispose() has been called
-manager.isDisposed(); // boolean
-
-// Whether the last close was intentional (via disconnect())
-manager.isIntentionalClose(); // boolean
-
-// WebSocket sub-protocols
-manager.getProtocols(); // readonly string[]`}
-			language="tsx"
-			filename="state.ts"
-		/>
-	</ContentSection>
-
-	<ContentSection label="Observers">
+	<ContentSection label="useSocketReady">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Subscribe to state changes and debug events. Both return an unsubscribe function.
+			Fires after every <InlineCode>connect</InlineCode> once subscriptions
+			are restored. The handler receives the list of keys that were replayed
+			to the server. Good place to refetch REST queries that may have missed
+			events during the disconnect.
 		</p>
 		<CodeBlock
-			code={`// React to connection state changes
-const unsub = manager.subscribeToConnectionState(() => {
-  console.log(manager.getConnectionState());
-});
-
-// Listen to all internal debug events
-const unsubDebug = manager.addDebugListener((event) => {
-  console.log(event.type, event);
-});
-
-// Clean up
-unsub();
-unsubDebug();`}
+			code={`useSocketReady(manager, (restoredKeys) => {
+  qc.invalidateQueries({ queryKey: ["inbox"] });
+  if (restoredKeys.length > 0) {
+    console.log("restored streams:", restoredKeys);
+  }
+});`}
 			language="tsx"
-			filename="observers.ts"
+			filename="useSocketReady.tsx"
 		/>
 	</ContentSection>
 
-	<ContentSection label="Protocols">
+	<ContentSection label="useSocketLastUnsubscribe">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Add WebSocket sub-protocols before connecting. These are passed as the second
-			argument to the underlying <InlineCode>WebSocket</InlineCode> constructor.
+			Fires when the ref count for a subscription key drops to zero.
+			Receives the key and the stored unsubscribe payload. Typical use is
+			store eviction for a channel that nobody is watching anymore.
 		</p>
 		<CodeBlock
-			code={`manager.addProtocols(["graphql-ws"]);
-manager.connect();`}
+			code={`useSocketLastUnsubscribe(manager, (key, data) => {
+  if (key.startsWith("room:")) {
+    useChatStore.getState().evictRoom(key);
+  }
+});`}
 			language="tsx"
-			filename="protocols.ts"
+			filename="useSocketLastUnsubscribe.tsx"
 		/>
+		<Callout type="warning" title="Mount on something that outlives subscribers">
+			If you mount this hook inside the same component that calls
+			<InlineCode>useSocketSubscription</InlineCode>, the hook unmounts
+			together with the last subscriber and never fires. Mount it in a
+			component that stays alive while features come and go — app shell,
+			layout, or a dedicated bridge. The moment you need to react to "the
+			last consumer is gone," the reactor itself has to still be there.
+		</Callout>
 	</ContentSection>
 
-	<ContentSection label="useConnectionState">
+	<ContentSection label="useSocketConnectionState">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			A React hook that returns the current connection state. Built on
-			<InlineCode>useSyncExternalStore</InlineCode> so it is safe for
+			Observable connection state. Built on
+			<InlineCode>useSyncExternalStore</InlineCode> so it is safe under
 			concurrent rendering.
 		</p>
 		<CodeBlock
-			code={`import { useConnectionState } from "@luciodale/react-socket";
-
-function StatusBadge() {
-  const state = useConnectionState(manager);
-  // "disconnected" | "connecting" | "connected" | "reconnecting"
-  return <span>{state}</span>;
-}`}
+			code={`const state = useSocketConnectionState(manager);
+// "disconnected" | "connecting" | "connected" | "reconnecting"`}
 			language="tsx"
-			filename="StatusBadge.tsx"
+			filename="useSocketConnectionState.tsx"
 		/>
 	</ContentSection>
 
-	<ContentSection label="createLocalStorage">
+	<ContentSection label="Manager read APIs">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			A helper that wraps <InlineCode>window.localStorage</InlineCode> behind the
-			async <InlineCode>IStorage</InlineCode> interface. All operations are
-			wrapped in try/catch so they fail silently when storage is unavailable.
+			These are not hooks. Use them from outside React or from imperative
+			code that already has the manager reference.
 		</p>
 		<CodeBlock
-			code={`import { createLocalStorage } from "@luciodale/react-socket";
+			code={`// Connection
+manager.getConnectionState();
+manager.subscribeToConnectionState(listener); // returns unsubscribe
 
-const storage = createLocalStorage();`}
+// Messages
+manager.addMessageListener(listener);         // returns unsubscribe
+
+// Subscriptions
+manager.subscribe(key, data);
+manager.unsubscribe(key, data);
+manager.getRefCount(key);
+manager.getSubscriptionRefCounts();
+manager.getSubscriptionData();
+manager.getPendingSubscriptions();
+manager.hasPendingSubscription(key);
+manager.subscribeToPendingSubscriptions(listener); // returns unsubscribe
+
+// Send
+manager.send({ data, ackId?, meta? });
+manager.getInFlightMessages();
+
+// Protocols
+manager.addProtocols(["graphql-ws"]);
+manager.getProtocols();
+
+// Debug
+manager.addDebugListener(listener);`}
 			language="tsx"
-			filename="storage.ts"
+			filename="manager-api.ts"
 		/>
-		<p class="text-white/60 mt-4 leading-relaxed">
-			Used as input to <InlineCode>createUndeliveredSync</InlineCode>.
-			See <a href={href("/docs/undelivered-sync")} class="text-accent hover:underline">Undelivered Sync</a>.
-		</p>
 	</ContentSection>
 
-	<ContentSection label="createUndeliveredSync">
+	<ContentSection label="Discriminator override">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Creates a persistent store for messages that haven't been delivered yet.
-			See the <a href={href("/docs/undelivered-sync")} class="text-accent hover:underline">Undelivered Sync</a> guide
-			for a full walkthrough.
+			By default the library narrows on <InlineCode>type</InlineCode>. If
+			your protocol uses <InlineCode>kind</InlineCode>, <InlineCode>op</InlineCode>, or anything else, map the wire shape once inside
+			<InlineCode>deserialize</InlineCode> — that is the recommended path.
+			You can also pass the discriminator as the third generic plus a
+			<InlineCode>discriminator</InlineCode> option when rewriting at the
+			boundary is not possible.
 		</p>
 		<CodeBlock
-			code={`import { createUndeliveredSync, createLocalStorage } from "@luciodale/react-socket";
+			code={`const manager = new WebSocketManager<TClientMsg, TServerMsg, "kind">({
+  url: "wss://...",
+  discriminator: "kind",
+  serialize: (msg) => JSON.stringify(msg),
+  deserialize: (raw) => JSON.parse(raw) as TServerMsg,
+});
 
-const undelivered = createUndeliveredSync<TClientMsg>({
+useSocketEvent(manager, "notification", (msg) => {
+  // narrowed via Extract<TServerMsg, { kind: "notification" }>
+});`}
+			language="tsx"
+			filename="discriminator.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="createLocalStorage / createUndeliveredSync">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Orthogonal helpers for offline message queuing. See
+			<a href={href("/docs/undelivered-sync")} class="text-accent hover:underline">Undelivered Sync</a>.
+		</p>
+		<CodeBlock
+			code={`import {
+  createLocalStorage,
+  createUndeliveredSync,
+} from "@luciodale/react-socket";
+
+const undelivered = createUndeliveredSync<TStoredMessage>({
   storage: createLocalStorage(),
-  storageKey: "ws_undelivered_messages", // optional, this is the default
+  storageKey: "my_app_undelivered",
 });
 
 await undelivered.init();`}
@@ -243,60 +377,37 @@ await undelivered.init();`}
 	<ContentSection label="Types">
 		<CodeBlock
 			code={`import type {
-  // Connection state union
-  TConnectionState,
-  // "disconnected" | "connecting" | "connected" | "reconnecting"
-
-  // Constructor options
-  TManagerConfig,
-
-  // Argument to send()
-  TSendParams,
-
-  // Debug event (id + timestamp + payload)
-  TDebugEvent,
-
-  // The payload portion of a debug event
-  TDebugEventPayload,
-
-  // Union of all debug event type strings
-  TDebugEventType,
-
-  // WebSocket transport interface (for custom transports)
-  IWebSocketTransport,
-
-  // Async storage interface (for undelivered sync)
-  IStorage,
-
-  // Return type of createUndeliveredSync
-  TUndeliveredSync,
+  TConnectionState,        // connection state union
+  TManagerConfig,          // constructor options
+  TSendParams,             // argument to send()
+  TDebugEvent,             // id + timestamp + payload
+  TDebugEventPayload,      // payload portion
+  TDebugEventType,         // union of debug event type strings
+  IWebSocketTransport,     // custom transport interface
+  IStorage,                // async storage interface
+  TUndeliveredSync,        // return type of createUndeliveredSync
 } from "@luciodale/react-socket";`}
 			language="tsx"
 			filename="types.ts"
 		/>
 	</ContentSection>
 
-	<ContentSection label="Debug Event Types">
-		<p class="text-white/60 mb-4 leading-relaxed">
-			Every debug event has an <InlineCode>id</InlineCode>,
-			<InlineCode>timestamp</InlineCode>, and a
-			<InlineCode>type</InlineCode> discriminator. Here are all possible types:
-		</p>
+	<ContentSection label="Debug events">
 		<CodeBlock
-			code={`| Type                          | Payload                              |
-|-------------------------------|--------------------------------------|
-| connection-state-change       | { from, to }                         |
-| message-received              | { raw, deserialized, isPong }        |
-| message-sent                  | { ackId?, raw, deserialized }        |
-| subscribe                     | { key, refCount, raw?, deserialized? } |
-| unsubscribe                   | { key, refCount, raw?, deserialized? } |
-| in-flight-ack                 | { ackId }                            |
-| in-flight-drop                | { ids }                              |
-| pending-subscription-resolved | { key }                              |
-| reconnect-scheduled           | { attempt, delayMs }                 |
-| ready                         | { restoredKeys }                     |
-| deserialize-error             | { raw, error }                       |
-| dispose                       | —                                    |`}
+			code={`| Type                          | Payload                                 |
+|-------------------------------|-----------------------------------------|
+| connection-state-change       | { from, to }                            |
+| message-received              | { raw, deserialized, isPong }           |
+| message-sent                  | { ackId?, raw, deserialized }           |
+| subscribe                     | { key, refCount, raw?, deserialized? }  |
+| unsubscribe                   | { key, refCount, raw?, deserialized? }  |
+| in-flight-ack                 | { ackId }                               |
+| in-flight-drop                | { ids }                                 |
+| pending-subscription-resolved | { key }                                 |
+| reconnect-scheduled           | { attempt, delayMs }                    |
+| ready                         | { restoredKeys }                        |
+| deserialize-error             | { raw, error }                          |
+| dispose                       | —                                       |`}
 			language="text"
 			filename="debug-events"
 		/>

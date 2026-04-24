@@ -1,51 +1,66 @@
-import { useConnectionState, WebSocketManager } from "@luciodale/react-socket";
+import {
+	useSocketConnectionState,
+	useSocketEvent,
+	useSocketSend,
+	WebSocketManager,
+} from "@luciodale/react-socket";
 import { useEffect, useMemo, useState } from "react";
 import { getWsUrl } from "../../lib/ws-url";
 
 // ── Protocol ────────────────────────────────────────────────────────
 
-type TClientMsg = { action: "echo"; text: string };
-type TServerMsg = { action: "echo"; text: string };
+type TClientMsg = { type: "echo"; text: string };
+type TServerMsg = { type: "echo"; text: string };
 
 // ── Component ───────────────────────────────────────────────────────
 
+type TEntry =
+	| { id: string; kind: "you"; text: string }
+	| { id: string; kind: "server"; text: string }
+	| { id: string; kind: "not-sent"; text: string };
+
 export function FireAndForget() {
 	const [input, setInput] = useState("");
-	const [messages, setMessages] = useState<
-		Array<{ id: string; from: "you" | "server"; text: string }>
-	>([]);
+	const [messages, setMessages] = useState<TEntry[]>([]);
 
-	const manager = useMemo(() => {
-		const m = new WebSocketManager<TClientMsg, TServerMsg>({
-			url: getWsUrl(),
-			serialize: (msg) => JSON.stringify(msg),
-			deserialize: (raw) => JSON.parse(raw) as TServerMsg,
-
-			onMessageReceived(msg) {
-				setMessages((prev) => [
-					...prev,
-					{ id: crypto.randomUUID(), from: "server", text: msg.text },
-				]);
-			},
-		});
-		return m;
-	}, []);
+	const manager = useMemo(
+		() =>
+			new WebSocketManager<TClientMsg, TServerMsg>({
+				url: getWsUrl(),
+				serialize: (msg) => JSON.stringify(msg),
+				deserialize: (raw) => JSON.parse(raw) as TServerMsg,
+			}),
+		[],
+	);
 
 	useEffect(() => {
 		manager.connect();
 		return () => manager.disconnect();
 	}, [manager]);
 
-	const state = useConnectionState(manager);
+	useSocketEvent(manager, "echo", (msg) => {
+		setMessages((prev) => [
+			...prev,
+			{ id: crypto.randomUUID(), kind: "server", text: msg.text },
+		]);
+	});
+
+	const state = useSocketConnectionState(manager);
+	const connected = state === "connected";
+	const { send } = useSocketSend(manager);
 
 	function handleSend() {
 		if (!input.trim()) return;
 		const text = input.trim();
+		const ok = send({ type: "echo", text });
 		setMessages((prev) => [
 			...prev,
-			{ id: crypto.randomUUID(), from: "you", text },
+			{
+				id: crypto.randomUUID(),
+				kind: ok ? "you" : "not-sent",
+				text,
+			},
 		]);
-		manager.send({ data: { action: "echo", text } });
 		setInput("");
 	}
 
@@ -64,8 +79,18 @@ export function FireAndForget() {
 				)}
 				{messages.map((m) => (
 					<div key={m.id} className="mb-1 text-sm text-white/70">
-						<span className="font-semibold text-white/90">{m.from}:</span>{" "}
-						{m.text}
+						{m.kind === "not-sent" ? (
+							<>
+								<span className="font-semibold text-rose-400">not sent:</span>{" "}
+								<span className="line-through">{m.text}</span>
+								<span className="ml-2 text-xs text-rose-400/70">(offline)</span>
+							</>
+						) : (
+							<>
+								<span className="font-semibold text-white/90">{m.kind}:</span>{" "}
+								{m.text}
+							</>
+						)}
 					</div>
 				))}
 			</div>
@@ -75,7 +100,9 @@ export function FireAndForget() {
 					value={input}
 					onChange={(e) => setInput(e.target.value)}
 					onKeyDown={(e) => e.key === "Enter" && handleSend()}
-					placeholder="Type something..."
+					placeholder={
+						connected ? "Type something..." : "Offline — reconnecting..."
+					}
 					className="flex-1 rounded border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 outline-none focus:border-accent"
 				/>
 				<button
@@ -86,6 +113,12 @@ export function FireAndForget() {
 					Send
 				</button>
 			</div>
+
+			{!connected && (
+				<p className="mt-2 text-xs text-rose-400/80">
+					You are offline. Messages you send now will be marked as not sent.
+				</p>
+			)}
 		</div>
 	);
 }

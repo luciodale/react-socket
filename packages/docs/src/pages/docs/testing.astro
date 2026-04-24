@@ -1,0 +1,237 @@
+---
+import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
+import DocsPage from "../../layouts/DocsPage.astro";
+import { href } from "../../lib/link";
+
+export const prerender = true;
+
+// Code samples in frontmatter so template literals + TS generics
+// don't trip the astro/esbuild parser.
+const importSample = `import { MockTransport } from "@luciodale/react-socket/testing";`;
+
+const basicTestSample = `import { describe, expect, it } from "vitest";
+import { WebSocketManager } from "@luciodale/react-socket";
+import { MockTransport } from "@luciodale/react-socket/testing";
+
+type TClientMsg = { type: "hello"; name: string };
+type TServerMsg = { type: "hi"; name: string };
+
+describe("greeting flow", () => {
+  it("sends hello and reacts to hi", () => {
+    const transport = new MockTransport();
+    const received: TServerMsg[] = [];
+
+    const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+      url: "ws://test",
+      transport,
+      serialize: (msg) => JSON.stringify(msg),
+      deserialize: (raw) => JSON.parse(raw),
+    });
+    manager.addMessageListener((msg) => received.push(msg));
+
+    manager.connect();
+    transport.simulateOpen();
+
+    manager.send({ data: { type: "hello", name: "world" } });
+    expect(transport.lastSentParsed<TClientMsg>()).toEqual({
+      type: "hello",
+      name: "world",
+    });
+
+    transport.simulateMessage(JSON.stringify({ type: "hi", name: "server" }));
+    expect(received).toEqual([{ type: "hi", name: "server" }]);
+  });
+});`;
+
+const reconnectSample = `it("schedules reconnect on abnormal close", async () => {
+  const transport = new MockTransport();
+  const states: string[] = [];
+
+  const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+    url: "ws://test",
+    transport,
+    serialize: (m) => JSON.stringify(m),
+    deserialize: (r) => JSON.parse(r),
+    reconnectBaseDelayMs: 10,
+    reconnectMaxAttempts: 3,
+    onConnectionStateChange: (s) => states.push(s),
+  });
+
+  manager.connect();
+  transport.simulateOpen();
+  expect(states).toContain("connected");
+
+  // Drop the connection. 1006 is the default for simulateClose.
+  transport.simulateClose();
+
+  // States should now include "reconnecting"
+  expect(states).toContain("reconnecting");
+
+  // Each reconnect attempt records a fresh connectCall
+  await vi.waitFor(() => {
+    expect(transport.connectCalls.length).toBeGreaterThan(1);
+  });
+});`;
+
+const ackSample = `it("clears in-flight on ack from server", () => {
+  const transport = new MockTransport();
+  const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+    url: "ws://test",
+    transport,
+    serialize: (m) => JSON.stringify(m),
+    deserialize: (r) => JSON.parse(r),
+    getAckId: (msg) => (msg.type === "delivered" ? msg.ackId : undefined),
+  });
+
+  manager.connect();
+  transport.simulateOpen();
+
+  manager.send({ data: { type: "send", text: "hi" }, ackId: "ack-1" });
+  expect(manager.getInFlightMessages().has("ack-1")).toBe(true);
+
+  transport.simulateMessage(JSON.stringify({ type: "delivered", ackId: "ack-1" }));
+  expect(manager.getInFlightMessages().has("ack-1")).toBe(false);
+});`;
+
+const hookTestSample = `import { act, renderHook } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import {
+  useSocketConnectionState,
+  WebSocketManager,
+} from "@luciodale/react-socket";
+import { MockTransport } from "@luciodale/react-socket/testing";
+
+describe("useSocketConnectionState", () => {
+  it("tracks state transitions", () => {
+    const transport = new MockTransport();
+    const manager = new WebSocketManager<{ type: "x" }, { type: "x" }>({
+      url: "ws://test",
+      transport,
+      serialize: JSON.stringify,
+      deserialize: JSON.parse,
+    });
+
+    const { result } = renderHook(() => useSocketConnectionState(manager));
+    expect(result.current).toBe("disconnected");
+
+    act(() => {
+      manager.connect();
+    });
+    expect(result.current).toBe("connecting");
+
+    act(() => {
+      transport.simulateOpen();
+    });
+    expect(result.current).toBe("connected");
+  });
+});`;
+
+const setupSample = `// vitest.config.ts
+import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  test: {
+    environment: "jsdom",
+    globals: true,
+  },
+});`;
+---
+
+<DocsPage title="Testing">
+	<ContentSection label="Testing">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			react-socket ships a tiny in-memory transport so you can unit-test
+			components and hooks without a real WebSocket server. The transport
+			implements the same <InlineCode>IWebSocketTransport</InlineCode>
+			interface the manager uses internally, so behavior matches production.
+		</p>
+		<p class="text-white/60 leading-relaxed">
+			Import it from the dedicated subpath so the testing helpers do not
+			leak into your production bundle:
+		</p>
+		<CodeBlock code={importSample} language="tsx" filename="setup.ts" />
+	</ContentSection>
+
+	<ContentSection label="Basic flow">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Pass <InlineCode>transport</InlineCode> in the manager config, then
+			drive the lifecycle with <InlineCode>simulateOpen</InlineCode>,
+			<InlineCode>simulateMessage</InlineCode>, and friends. The transport
+			records every <InlineCode>connect</InlineCode>,
+			<InlineCode>send</InlineCode>, and <InlineCode>disconnect</InlineCode>
+			call so you can assert against them.
+		</p>
+		<CodeBlock code={basicTestSample} language="tsx" filename="greeting.test.ts" />
+	</ContentSection>
+
+	<ContentSection label="Simulating reconnects">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			<InlineCode>simulateClose()</InlineCode> defaults to code 1006, which the
+			manager treats as an abnormal drop and schedules a reconnect. Lower
+			<InlineCode>reconnectBaseDelayMs</InlineCode> and
+			<InlineCode>reconnectMaxAttempts</InlineCode> in tests so backoff does
+			not slow the suite.
+		</p>
+		<CodeBlock code={reconnectSample} language="tsx" filename="reconnect.test.ts" />
+		<Callout type="tip" title="Use vi.useFakeTimers for deterministic backoff">
+			Wrap reconnect tests in <InlineCode>vi.useFakeTimers()</InlineCode>
+			and advance time with <InlineCode>vi.advanceTimersByTimeAsync</InlineCode>
+			so the suite never blocks on real timers.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Simulating ack flow">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Wire <InlineCode>getAckId</InlineCode> in the manager config and then
+			deliver a <InlineCode>delivered</InlineCode> frame to confirm the
+			in-flight registry clears.
+		</p>
+		<CodeBlock code={ackSample} language="tsx" filename="ack.test.ts" />
+	</ContentSection>
+
+	<ContentSection label="Testing hooks">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Use React Testing Library's <InlineCode>renderHook</InlineCode> with
+			<InlineCode>act</InlineCode> to drive the manager. The hook reads from
+			the manager via <InlineCode>useSyncExternalStore</InlineCode>, so each
+			synchronous transition is observable on the next render.
+		</p>
+		<CodeBlock code={hookTestSample} language="tsx" filename="useSocketConnectionState.test.tsx" />
+	</ContentSection>
+
+	<ContentSection label="Vitest setup">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			A jsdom-based environment is enough for hook tests. No browser needed.
+		</p>
+		<CodeBlock code={setupSample} language="ts" filename="vitest.config.ts" />
+	</ContentSection>
+
+	<ContentSection label="What MockTransport exposes">
+		<ul class="list-disc list-inside space-y-2 text-white/60">
+			<li><InlineCode>connectCalls</InlineCode>, <InlineCode>sentMessages</InlineCode>, <InlineCode>disconnectCalls</InlineCode> — captured in order, ready for direct assertions</li>
+			<li><InlineCode>simulateOpen()</InlineCode> — flips the transport into OPEN and fires onopen</li>
+			<li><InlineCode>simulateClose(code?, reason?)</InlineCode> — defaults to 1006, pass 1000 for a clean close</li>
+			<li><InlineCode>simulateMessage(data)</InlineCode> — delivers a server frame</li>
+			<li><InlineCode>simulateError()</InlineCode> — fires the error handler</li>
+			<li><InlineCode>reset()</InlineCode> — wipes captured calls; listeners stay attached</li>
+			<li><InlineCode>lastSentParsed&lt;T&gt;()</InlineCode> — JSON-parses the most recent send</li>
+		</ul>
+	</ContentSection>
+
+	<ContentSection label="Next steps">
+		<ul class="space-y-2 text-white/60">
+			<li>
+				<a href={href("/docs/api")} class="text-accent hover:underline">API reference</a> — full manager surface you can assert against
+			</li>
+			<li>
+				<a href={href("/docs/error-handling")} class="text-accent hover:underline">Error handling</a> — patterns to test, including offline send and deserialize errors
+			</li>
+			<li>
+				<a href={href("/docs/auth")} class="text-accent hover:underline">Authentication</a> — testing the first-message auth flow
+			</li>
+		</ul>
+	</ContentSection>
+</DocsPage>

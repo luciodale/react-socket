@@ -13,19 +13,22 @@ export const prerender = true;
 <DocsPage title="Configuration">
 	<ContentSection label="Configuration">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			The manager is configured through a single options object. Only three fields
-			are required — a URL and a pair of serialization functions. Everything else
-			has sensible defaults. Because the constructor is generic over your message
-			types, every option is fully typed.
+			The manager is configured through a single options object. Three fields
+			are required: URL and a pair of serialization functions. Everything
+			else has sensible defaults. Every option is typed against your client
+			and server message generics.
 		</p>
 	</ContentSection>
 
-	<ContentSection label="Options at a Glance">
+	<ContentSection label="Options at a glance">
 		<PropsTable
 			rows={[
-				{ name: "url", type: "string", description: "WebSocket endpoint URL", required: true },
+				{ name: "url", type: "string | (() => string | Promise<string>)", description: "WebSocket endpoint URL. Pass a function to resolve it per connect (e.g. auth tokens)", required: true },
 				{ name: "serialize", type: "(msg: TClientMsg) => string", description: "Convert outgoing messages to strings", required: true },
 				{ name: "deserialize", type: "(raw: string) => TServerMsg", description: "Parse incoming strings into typed messages", required: true },
+				{ name: "discriminator", type: "string", defaultValue: '"type"', description: "Key used to narrow TServerMsg in useSocketEvent" },
+				{ name: "getAckId", type: "(msg: TServerMsg) => string | undefined", description: "Return the ack id when an incoming message confirms an outbound send. Library auto-clears the matching in-flight entry" },
+				{ name: "getSubscriptionResolvedKey", type: "(msg: TServerMsg) => string | undefined", description: "Return the subscription key when an incoming message confirms a subscribe. Library auto-clears the pending marker" },
 				{ name: "ping", type: "() => TClientMsg", description: "Function returning the ping message, called each interval" },
 				{ name: "isPong", type: "(msg: TServerMsg) => boolean", description: "Return true if an incoming message is a pong" },
 				{ name: "pingIntervalMs", type: "number", defaultValue: "30000", description: "Milliseconds between pings" },
@@ -34,163 +37,197 @@ export const prerender = true;
 				{ name: "reconnectBaseDelayMs", type: "number", defaultValue: "1000", description: "Initial reconnection delay" },
 				{ name: "reconnectMaxDelayMs", type: "number", defaultValue: "5000", description: "Maximum reconnection delay" },
 				{ name: "transport", type: "IWebSocketTransport", description: "Custom WebSocket transport for testing or non-browser environments" },
-				{ name: "onMessageReceived", type: "(msg: TServerMsg) => void", description: "Called for every incoming message (except pongs)" },
-				{ name: "onSendIntent", type: "(params: TSendParams) => void", description: "Called on every send(), even when offline" },
-				{ name: "onConnectionStateChange", type: "(state: TConnectionState) => void", description: "Called when connection state changes" },
-				{ name: "onReady", type: "() => void", description: "Called after (re)connect once subscriptions are restored" },
-				{ name: "onInFlightDrop", type: "(messages) => void", description: "Called when in-flight messages are dropped on disconnect" },
-				{ name: "onLastUnsubscribe", type: "(key, data) => void", description: "Called when the last subscriber for a key leaves" },
-				{ name: "onDebug", type: "(event: TDebugEvent) => void", description: "Called for every internal event" },
+				{ name: "binaryType", type: '"blob" | "arraybuffer"', description: "Tell the transport which binary type to deliver. Required when sending or receiving binary frames; widen the manager's TWire / TIncoming generics accordingly" },
+				{ name: "onSendIntent", type: "(params: TSendParams) => void", description: "Fires on every send(), even when offline. Use for optimistic UI" },
+				{ name: "onConnectionStateChange", type: "(state: TConnectionState) => void", description: "Fires when connection state changes" },
+				{ name: "onReady", type: "(restoredKeys: string[]) => void", description: "Fires after (re)connect once subscriptions are restored. Receives the list of keys the library replayed" },
+				{ name: "onInFlightDrop", type: "(messages) => void", description: "Fires when in-flight messages are dropped on disconnect" },
+				{ name: "onLastUnsubscribe", type: "(key, data) => void", description: "Fires when the last subscriber for a key leaves" },
+				{ name: "onDebug", type: "(event: TDebugEvent) => void", description: "Fires for every internal event" },
 			]}
 		/>
 	</ContentSection>
 
-	<ContentSection label="Required Options">
+	<ContentSection label="Required options">
 		<CodeBlock
 			code={`const manager = new WebSocketManager<TClientMsg, TServerMsg>({
-  // The WebSocket endpoint
   url: "wss://api.example.com/ws",
-
-  // How to turn your typed messages into strings for the wire
   serialize: (msg) => JSON.stringify(msg),
-
-  // How to turn incoming strings back into typed messages
   deserialize: (raw) => JSON.parse(raw),
 });`}
 			language="tsx"
 			filename="manager.ts"
 		/>
 		<p class="text-white/60 mt-4 leading-relaxed">
-			The <InlineCode>serialize</InlineCode> and
-			<InlineCode>deserialize</InlineCode> functions are typed against
-			your generics, so TypeScript ensures you're producing and consuming the right shapes.
-			You can use JSON, MessagePack, Protobuf — whatever your server speaks.
+			<InlineCode>serialize</InlineCode> and
+			<InlineCode>deserialize</InlineCode> are typed against your generics,
+			so TypeScript catches shape mismatches. Swap JSON for MessagePack,
+			Protobuf, or anything else without touching the rest of your code.
 		</p>
 	</ContentSection>
 
-	<ContentSection label="Ping / Pong">
+	<ContentSection label="Discriminator">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Keep-alive pings prevent idle connections from being dropped by proxies
-			or load balancers. The <InlineCode>ping</InlineCode> option is
-			a function, so you can include dynamic values like timestamps:
+			<InlineCode>useSocketEvent</InlineCode> narrows server messages by one
+			field. The default is <InlineCode>"type"</InlineCode>. Override by
+			passing the key as the third generic plus the
+			<InlineCode>discriminator</InlineCode> option:
+		</p>
+		<CodeBlock
+			code={`type TServerMsg =
+  | { kind: "notification"; title: string }
+  | { kind: "user-typing"; userId: string };
+
+const manager = new WebSocketManager<TClientMsg, TServerMsg, "kind">({
+  url: "wss://...",
+  discriminator: "kind",
+  serialize: (msg) => JSON.stringify(msg),
+  deserialize: (raw) => JSON.parse(raw) as TServerMsg,
+});
+
+useSocketEvent(manager, "notification", (msg) => {
+  msg.title; // narrowed
+});`}
+			language="tsx"
+			filename="discriminator.ts"
+		/>
+		<Callout type="tip">
+			If your wire shape uses a non conventional key but you would rather
+			keep library defaults, map at the <InlineCode>deserialize</InlineCode> boundary instead: <InlineCode>{"{ type: parsed.kind, ...rest }"}</InlineCode>. One place, done.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Lifecycle extractors">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Two extractors let the library auto wire ack and subscription
+			resolution. When either returns a string, the matching internal
+			bookkeeping fires before your listeners run. You never call
+			<InlineCode>ackInFlight</InlineCode> or
+			<InlineCode>resolvePendingSubscription</InlineCode> from user code.
 		</p>
 		<CodeBlock
 			code={`{
-  // Called on every interval tick — return a fresh ping message
-  ping: () => ({ action: "ping", timestamp: Date.now() }),
+  // When the server confirms an outbound send, return its ack id.
+  // Library removes the matching in-flight entry automatically.
+  getAckId: (msg) => (msg.type === "delivered" ? msg.ackId : undefined),
 
-  // Return true if an incoming message is a pong
-  isPong: (msg) => msg.action === "pong",
+  // When the server confirms a subscribe, return the subscription key.
+  // Library clears the pending marker automatically —
+  // useSocketPendingSubscription flips to false.
+  getSubscriptionResolvedKey: (msg) =>
+    msg.type === "subscribe-ack" ? msg.channel : undefined,
+}`}
+			language="tsx"
+			filename="extractors.ts"
+		/>
+	</ContentSection>
 
-  // How often to send pings (default: 30000ms)
+	<ContentSection label="Ping / pong">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Keep alive pings prevent idle connections from being killed by proxies
+			or load balancers. <InlineCode>ping</InlineCode> is a function so you
+			can include a fresh timestamp each tick.
+		</p>
+		<CodeBlock
+			code={`{
+  ping: () => ({ type: "ping", timestamp: Date.now() }),
+  isPong: (msg) => msg.type === "pong",
   pingIntervalMs: 30_000,
-
-  // How long to wait for a pong before disconnecting (default: 10000ms)
   pongTimeoutMs: 10_000,
 }`}
 			language="tsx"
-			filename="manager.ts"
+			filename="ping.ts"
 		/>
 		<Callout type="info">
-			If <InlineCode>isPong</InlineCode> is provided and the server doesn't respond within
-			<InlineCode>pongTimeoutMs</InlineCode>, the connection is closed and reconnection begins
-			automatically.
+			If <InlineCode>isPong</InlineCode> is set and the server does not
+			respond within <InlineCode>pongTimeoutMs</InlineCode>, the connection
+			closes and reconnection begins automatically.
 		</Callout>
 	</ContentSection>
 
 	<ContentSection label="Reconnection">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			When a connection drops unexpectedly, the manager automatically reconnects
-			using exponential backoff with jitter. See the
-			<a href={href("/docs/reconnection")} class="text-accent hover:underline">Reconnection</a> guide for the full picture.
+			Exponential backoff with jitter, capped. See the
+			<a href={href("/docs/reconnection")} class="text-accent hover:underline">Reconnection</a> guide.
 		</p>
 		<CodeBlock
 			code={`{
-  // Maximum reconnect attempts before giving up (default: 5)
   reconnectMaxAttempts: 5,
-
-  // Initial delay before the first retry (default: 1000ms)
   reconnectBaseDelayMs: 1_000,
-
-  // Cap on the delay between retries (default: 5000ms)
   reconnectMaxDelayMs: 5_000,
 }`}
 			language="tsx"
-			filename="manager.ts"
+			filename="reconnection.ts"
 		/>
 	</ContentSection>
 
-	<ContentSection label="Callbacks as Dispatchers">
+	<ContentSection label="Callbacks vs hooks">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Callbacks are where your application logic lives. Think of them as dispatchers —
-			each one handles a specific moment in the message lifecycle. The manager calls
-			them at the right time; you decide what to do:
+			Five of the optional callbacks (<InlineCode>onSendIntent</InlineCode>,
+			<InlineCode>onInFlightDrop</InlineCode>,
+			<InlineCode>onReady</InlineCode>,
+			<InlineCode>onLastUnsubscribe</InlineCode>,
+			<InlineCode>onConnectionStateChange</InlineCode>) have hook wrappers:
+			<InlineCode>useSocketSendIntent</InlineCode>,
+			<InlineCode>useSocketInFlightDrop</InlineCode>,
+			<InlineCode>useSocketReady</InlineCode>,
+			<InlineCode>useSocketLastUnsubscribe</InlineCode>,
+			<InlineCode>useSocketConnectionState</InlineCode>. Both layers fire
+			additively. Inside React prefer the hooks for component scoped
+			logic; fall back to callbacks for non React consumers or
+			bootstrap logic. See
+			<a href={href("/docs/getting-started#two-layers-callback-config-and-hook-wrappers")} class="text-accent hover:underline">Two layers</a>.
 		</p>
+	</ContentSection>
+
+	<ContentSection label="Optional callbacks">
 		<CodeBlock
 			code={`{
-  // The main dispatcher. Branch on message type to handle each variant.
-  // This is where you update your store, ack in-flight messages, and
-  // resolve pending subscriptions.
-  onMessageReceived(msg) {
-    switch (msg.action) {
-      case "subscribe_ack":
-        manager.resolvePendingSubscription(\`chat:\${msg.channel}\`);
-        break;
-      case "message":
-        manager.ackInFlight(msg.id);
-        store.addMessage(msg);
-        break;
-    }
-  },
-
-  // Fires on every send() — even when offline.
-  // The right place for optimistic UI updates.
+  // Fires on every send(), even when offline. Optimistic UI goes here.
   onSendIntent({ data, ackId }) {
-    if (data.action === "message" && ackId) {
+    if (data.type === "message" && ackId) {
       store.addOptimistic(data, ackId);
     }
   },
 
-  // Connection state changes: "disconnected" | "connecting" | "connected" | "reconnecting"
+  // Connection state transitions.
   onConnectionStateChange(state) {
-    console.log("Connection:", state);
+    console.log("ws:", state);
   },
 
-  // Fires after a (re)connect once subscriptions have been restored.
-  // Good place to sync any state you may have missed while offline.
-  onReady() {
-    fetchMissedMessages();
+  // Fires after (re)connect once subscriptions are restored.
+  // restoredKeys is the list of subscriptions the library replayed.
+  onReady(restoredKeys) {
+    refetchInbox();
+    console.log("restored:", restoredKeys);
   },
 
   // In-flight messages that never got confirmed before a disconnect.
-  // Save them for retry or mark them as failed.
   onInFlightDrop(messages) {
-    for (const { id } of messages) {
-      store.markFailed(id);
-    }
+    for (const { id } of messages) store.markFailed(id);
   },
 
-  // The last subscriber for a key left. Clean up related state.
-  onLastUnsubscribe(key, data) {
+  // Last subscriber for a key left. Clean up related state.
+  onLastUnsubscribe(key) {
     store.clearChannel(key);
   },
 
-  // Every internal event — useful for debugging and the inspector panel.
+  // Every internal event — useful for debugging / inspector.
   onDebug(event) {
     console.log(event.type, event);
   },
 }`}
 			language="tsx"
-			filename="manager.ts"
+			filename="callbacks.ts"
 		/>
 	</ContentSection>
 
-	<ContentSection label="Custom Transport">
+	<ContentSection label="Custom transport">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			By default the manager uses the browser's native <InlineCode>WebSocket</InlineCode>.
-			You can provide a custom transport that implements
-			<InlineCode>IWebSocketTransport</InlineCode> — useful for
-			testing or non-browser environments:
+			Default transport is the browser's native
+			<InlineCode>WebSocket</InlineCode>. Implement
+			<InlineCode>IWebSocketTransport</InlineCode> for tests or non browser
+			environments.
 		</p>
 		<CodeBlock
 			code={`import type { IWebSocketTransport } from "@luciodale/react-socket";
@@ -206,27 +243,38 @@ const customTransport: IWebSocketTransport = {
   onerror: null,
 };
 
-const manager = new WebSocketManager<TClientMsg, TServerMsg>({
-  url: "wss://api.example.com/ws",
+new WebSocketManager<TClientMsg, TServerMsg>({
+  url: "wss://...",
   serialize: (msg) => JSON.stringify(msg),
   deserialize: (raw) => JSON.parse(raw),
   transport: customTransport,
 });`}
 			language="tsx"
-			filename="manager.ts"
+			filename="custom-transport.ts"
 		/>
+		<Callout type="tip" title="Use MockTransport for tests">
+			You almost never need to roll your own. Import
+			<InlineCode>MockTransport</InlineCode> from
+			<InlineCode>@luciodale/react-socket/testing</InlineCode> and pass it as
+			<InlineCode>transport</InlineCode>. It captures every send and exposes
+			<InlineCode>simulateOpen</InlineCode> /
+			<InlineCode>simulateMessage</InlineCode> /
+			<InlineCode>simulateClose</InlineCode> for synchronous lifecycle control
+			in unit tests. See the
+			<a href={href("/docs/testing")} class="text-accent hover:underline"> Testing</a> page.
+		</Callout>
 	</ContentSection>
 
-	<ContentSection label="Next Steps">
+	<ContentSection label="Next">
 		<ul class="space-y-2 text-white/60">
 			<li>
-				<a href={href("/docs/api")} class="text-accent hover:underline">API Reference</a> — every method and type
+				<a href={href("/docs/api")} class="text-accent hover:underline">API Reference</a> — hooks and manager surface
 			</li>
 			<li>
-				<a href={href("/docs/subscriptions")} class="text-accent hover:underline">Subscriptions</a> — channels with automatic deduplication
+				<a href={href("/docs/patterns")} class="text-accent hover:underline">Patterns</a> — scenario driven examples
 			</li>
 			<li>
-				<a href={href("/docs/optimistic-updates")} class="text-accent hover:underline">Sending Messages</a> — fire-and-forget and acknowledged sends
+				<a href={href("/docs/testing")} class="text-accent hover:underline">Testing</a> — MockTransport, simulating lifecycle, hook tests
 			</li>
 		</ul>
 	</ContentSection>

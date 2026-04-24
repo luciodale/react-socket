@@ -1,0 +1,141 @@
+---
+import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
+import { AuthRefresh } from "../../components/demos/AuthRefresh";
+import DocsPage from "../../layouts/DocsPage.astro";
+import { href } from "../../lib/link";
+
+export const prerender = true;
+
+// Code samples in frontmatter so template literals and TS generics
+// don't collide with the astro/esbuild JSX parser.
+const protocolSample = `type TClientMsg =
+  | { type: "auth"; token: string }
+  | { type: "simulate-session-expiry" };
+
+type TServerMsg =
+  | { type: "auth-required" }
+  | { type: "auth-ok"; userId: string }
+  | { type: "auth-expired" }
+  | { type: "unauthorized"; reason: string };`;
+
+const managerSample = `const manager = useMemo(() => {
+  let mgr: WebSocketManager<TClientMsg, TServerMsg>;
+  mgr = new WebSocketManager<TClientMsg, TServerMsg>({
+    // No token in the URL. The socket opens unauthenticated.
+    url: getWsUrl(),
+    serialize: (msg) => JSON.stringify(msg),
+    deserialize: (raw) => JSON.parse(raw),
+
+    // Fires after every (re)connect + subscription replay.
+    // Right seam for the first-message auth frame.
+    onReady() {
+      const token = tokenRef.current;
+      if (!token) return;
+      mgr.send({ data: { type: "auth", token } });
+    },
+  });
+  return mgr;
+}, []);`;
+
+const reauthSample = `useSocketEvent(manager, "auth-expired", () => {
+  setAuthed(false);
+  // Refresh the token and send a new auth frame.
+  // No reconnect: the socket stays open.
+  const next = mintToken();
+  tokenRef.current = next;
+  manager.send({ data: { type: "auth", token: next } });
+});
+
+useSocketEvent(manager, "auth-ok", (msg) => {
+  setAuthed(true);
+  setUserId(msg.userId);
+});
+
+useSocketEvent(manager, "unauthorized", () => {
+  setAuthed(false);
+  setUserId(null);
+});`;
+---
+
+<DocsPage title="First-message auth" description="Open the socket unauthenticated, then send the token as the first frame. Re-auth mid-session without a reconnect.">
+	<ContentSection label="First-message auth">
+		<p class="text-white/60 mb-6 leading-relaxed">
+			Browser WebSockets cannot carry an <InlineCode>Authorization</InlineCode>
+			header. Tokens in the URL end up in proxy and server logs. The cleaner
+			pattern is to open the socket with no credentials, then send an
+			<InlineCode>auth</InlineCode> frame as the very first message. The
+			manager's <InlineCode>onReady</InlineCode> hook fires on every
+			(re)connect, so this also handles reconnects for free.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Live Demo">
+		<AuthRefresh client:load />
+		<p class="text-white/60 mt-4 leading-relaxed">
+			<strong>Simulate session expiry</strong> asks the server to declare the
+			current session dead. The server emits <InlineCode>auth-expired</InlineCode>,
+			the client mints a fresh token and sends a new auth frame
+			<em>on the same open socket</em> — no reconnect.
+		</p>
+		<p class="text-white/60 mt-2 leading-relaxed">
+			<strong>Sign in with fresh token</strong> sends a new auth frame with a
+			minted token. Use it to simulate a manual re-login.
+		</p>
+		<p class="text-white/60 mt-2 leading-relaxed">
+			<strong>Try bad token</strong> sends an auth frame the server will reject.
+			The server replies <InlineCode>unauthorized</InlineCode> and the UI flips
+			to the gated state.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Protocol">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Three typed server messages cover the whole surface:
+			<InlineCode>auth-ok</InlineCode> (the happy path),
+			<InlineCode>auth-expired</InlineCode> (refresh, stay connected), and
+			<InlineCode>unauthorized</InlineCode> (hard stop).
+		</p>
+		<CodeBlock code={protocolSample} language="tsx" filename="types.ts" />
+	</ContentSection>
+
+	<ContentSection label="Sending the first frame">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			<InlineCode>onReady</InlineCode> runs after the socket opens and
+			subscriptions are replayed. On reconnects it runs again, so you do not
+			need a separate effect to re-auth.
+		</p>
+		<CodeBlock code={managerSample} language="tsx" filename="AuthRefresh.tsx" />
+		<Callout type="tip" title="Late binding the manager ref">
+			The <InlineCode>let mgr; mgr = new ...</InlineCode> pattern is so
+			<InlineCode>onReady</InlineCode> can call
+			<InlineCode>mgr.send()</InlineCode>. By the time the callback fires,
+			<InlineCode>mgr</InlineCode> is assigned.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Reacting to server events">
+		<CodeBlock code={reauthSample} language="tsx" filename="AuthRefresh.tsx" />
+		<Callout type="warning" title="No reconnect on auth-expired">
+			Because the re-auth happens on the open socket,
+			<InlineCode>forceReconnect()</InlineCode> is not needed — in fact you
+			want to avoid it so in-flight work and subscriptions are preserved.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Related">
+		<ul class="space-y-2 text-white/60">
+			<li>
+				<a href={href("/docs/auth")} class="text-accent hover:underline">Authentication guide</a> — all four transport options with tradeoffs
+			</li>
+			<li>
+				<a href={href("/docs/reconnection")} class="text-accent hover:underline">Reconnection</a> — why onReady fires on every reconnect
+			</li>
+			<li>
+				<a href={href("/docs/error-handling")} class="text-accent hover:underline">Error handling</a> — gating reads and writes while unauthed
+			</li>
+		</ul>
+	</ContentSection>
+</DocsPage>

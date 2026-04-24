@@ -1,0 +1,177 @@
+---
+import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
+import { MultiConnection } from "../../components/demos/MultiConnection";
+import DocsPage from "../../layouts/DocsPage.astro";
+import { href } from "../../lib/link";
+
+export const prerender = true;
+
+// Code samples in frontmatter so template literals + TS generics
+// don't trip the astro/esbuild parser.
+const managersSample = `// Two independent managers, two real WebSocket connections.
+// Both share the same first-message auth pattern and the same token source.
+
+const managerChat = useMemo(() => {
+  let mgr: WebSocketManager<TClientMsg, TServerMsg>;
+  mgr = new WebSocketManager<TClientMsg, TServerMsg>({
+    url: getWsUrl(),
+    serialize: (m) => JSON.stringify(m),
+    deserialize: (r) => JSON.parse(r),
+    onReady() {
+      if (tokenRef.current) {
+        mgr.send({ data: { type: "auth", token: tokenRef.current } });
+      }
+    },
+  });
+  return mgr;
+}, []);
+
+const managerNotif = useMemo(() => {
+  let mgr: WebSocketManager<TClientMsg, TServerMsg>;
+  mgr = new WebSocketManager<TClientMsg, TServerMsg>({
+    url: getWsUrl(),
+    serialize: (m) => JSON.stringify(m),
+    deserialize: (r) => JSON.parse(r),
+    onReady() {
+      if (tokenRef.current) {
+        mgr.send({ data: { type: "auth", token: tokenRef.current } });
+      }
+    },
+  });
+  return mgr;
+}, []);`;
+
+const sharedAuthSample = `type TAuthState = {
+  authed: boolean;
+  userId: string | null;
+  chatAuthed: boolean;
+  notifAuthed: boolean;
+};
+
+const AuthContext = createContext<TAuthState>({
+  authed: false,
+  userId: null,
+  chatAuthed: false,
+  notifAuthed: false,
+});
+
+function MultiConnection() {
+  const [chatAuthed, setChatAuthed] = useState(false);
+  const [notifAuthed, setNotifAuthed] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+
+  useSocketEvent(managerChat, "auth-ok", (msg) => {
+    setChatAuthed(true);
+    setUserId(msg.userId);
+  });
+  useSocketEvent(managerChat, "unauthorized", () => {
+    setChatAuthed(false);
+    setUserId(null);
+  });
+
+  useSocketEvent(managerNotif, "auth-ok", () => setNotifAuthed(true));
+  useSocketEvent(managerNotif, "unauthorized", () => setNotifAuthed(false));
+
+  // Shared flag is true only when BOTH connections are authed.
+  const authed = chatAuthed && notifAuthed;
+
+  return (
+    <AuthContext.Provider value={{ authed, userId, chatAuthed, notifAuthed }}>
+      <ChatPanel manager={managerChat} />
+      <NotificationsPanel manager={managerNotif} />
+    </AuthContext.Provider>
+  );
+}`;
+
+const subscribeSample = `// Subscribe to notifications once that connection is authed.
+useEffect(() => {
+  if (!notifAuthed) return;
+  managerNotif.send({ data: { type: "subscribe-notifications" } });
+  return () => {
+    managerNotif.send({ data: { type: "unsubscribe-notifications" } });
+  };
+}, [managerNotif, notifAuthed]);`;
+---
+
+<DocsPage title="Multiple connections" description="Two managers, two WebSocket connections, one shared auth context.">
+	<ContentSection label="Multiple connections">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Most apps need one WebSocket. Some need two: a primary application
+			channel and a separate notifications or telemetry channel that should
+			survive even when the primary path is busy. react-socket has nothing
+			special to say here — you create two managers, you get two connections.
+			What you do need is a single source of truth for the user's auth state.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Live demo">
+		<MultiConnection client:load />
+		<p class="text-white/60 mt-4 leading-relaxed">
+			On mount, the page opens two WebSockets to the same server. Each
+			authenticates independently with the first-message auth pattern. Once
+			both report <InlineCode>auth-ok</InlineCode>, the shared
+			<InlineCode>authed</InlineCode> flag flips to <strong>yes</strong> and
+			the chat input enables. The notifications connection then sends
+			<InlineCode>subscribe-notifications</InlineCode> and the server starts
+			pushing a frame every four seconds.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Two managers, one token source">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Both managers read the access token from the same module-level ref.
+			A single auth event invalidates both connections; both reconnect and
+			re-auth from the same source.
+		</p>
+		<CodeBlock code={managersSample} language="tsx" filename="MultiConnection.tsx" />
+		<Callout type="tip" title="Why two managers, not one">
+			Use one manager when channels share lifecycle, ordering, and
+			backpressure. Split into two when one channel must keep flowing while
+			the other is busy or paused, when isolation aids debugging, or when
+			the two endpoints differ (different paths, different auth scopes).
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Shared auth context">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Each connection's auth state is tracked separately, then combined into
+			a single <InlineCode>authed</InlineCode> flag exposed through context.
+			Components further down the tree only need to read one value.
+		</p>
+		<CodeBlock code={sharedAuthSample} language="tsx" filename="MultiConnection.tsx" />
+	</ContentSection>
+
+	<ContentSection label="Per-connection subscriptions">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Subscriptions are per-manager. The notifications channel subscribes on
+			its own connection once authed, and unsubscribes on cleanup. The chat
+			channel knows nothing about it.
+		</p>
+		<CodeBlock code={subscribeSample} language="tsx" filename="MultiConnection.tsx" />
+	</ContentSection>
+
+	<ContentSection label="When NOT to use two managers">
+		<ul class="list-disc list-inside space-y-2 text-white/60">
+			<li>If both channels share auth, ordering, and backpressure, one manager with discriminated message types is simpler.</li>
+			<li>If the second connection only carries a low-volume signal (presence, typing indicators), consider piggybacking on the main one.</li>
+			<li>Each connection multiplies your reconnect storms during outages. Two managers means two reconnect attempts.</li>
+		</ul>
+	</ContentSection>
+
+	<ContentSection label="Related">
+		<ul class="space-y-2 text-white/60">
+			<li>
+				<a href={href("/docs/auth")} class="text-accent hover:underline">Authentication</a> — the first-message pattern both managers use here
+			</li>
+			<li>
+				<a href={href("/docs/testing")} class="text-accent hover:underline">Testing</a> — mocking each connection independently
+			</li>
+			<li>
+				<a href={href("/docs/subscriptions")} class="text-accent hover:underline">Subscriptions</a> — ref-counting on a single manager
+			</li>
+		</ul>
+	</ContentSection>
+</DocsPage>

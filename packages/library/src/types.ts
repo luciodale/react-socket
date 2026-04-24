@@ -6,12 +6,29 @@ export type TConnectionState =
 	| "connected"
 	| "reconnecting";
 
+// ── Wire data ───────────────────────────────────────────────────────
+
+/**
+ * Anything WebSocket.send accepts. Returned by `serialize` and consumed by
+ * the transport. Default for `TWire` is `string`; widen the type parameter
+ * when sending binary frames.
+ */
+export type TWireData = string | ArrayBuffer | ArrayBufferView | Blob;
+
+/**
+ * Anything a `MessageEvent.data` can hold. Consumed by `deserialize`.
+ * Depends on `binaryType`: defaults to `string`, can be `ArrayBuffer` or
+ * `Blob` when binary mode is enabled.
+ */
+export type TIncomingData = string | ArrayBuffer | Blob;
+
 // ── Transport interface ─────────────────────────────────────────────
 
 export interface IWebSocketTransport {
 	connect(url: string, protocols?: string | string[]): void;
 	disconnect(code?: number, reason?: string): void;
-	send(data: string): void;
+	send(data: TWireData): void;
+	binaryType?: "blob" | "arraybuffer";
 	readonly readyState: number;
 	onopen: ((event: Event) => void) | null;
 	onclose: ((event: CloseEvent) => void) | null;
@@ -21,11 +38,19 @@ export interface IWebSocketTransport {
 
 // ── Manager config ──────────────────────────────────────────────────
 
-export type TManagerConfig<TClientMsg, TServerMsg> = {
-	url: string;
-	serialize: (msg: TClientMsg) => string;
-	deserialize: (raw: string) => TServerMsg;
+export type TManagerConfig<
+	TClientMsg,
+	TServerMsg extends Record<TKey, string>,
+	TKey extends string = "type",
+	TWire extends TWireData = string,
+	TIncoming extends TIncomingData = string,
+> = {
+	url: string | (() => string | Promise<string>);
+	serialize: (msg: TClientMsg) => TWire;
+	deserialize: (raw: TIncoming) => TServerMsg;
+	discriminator?: TKey;
 	transport?: IWebSocketTransport;
+	binaryType?: "blob" | "arraybuffer";
 	pingIntervalMs?: number;
 	pongTimeoutMs?: number;
 	reconnectMaxAttempts?: number;
@@ -33,10 +58,11 @@ export type TManagerConfig<TClientMsg, TServerMsg> = {
 	reconnectMaxDelayMs?: number;
 	ping?: () => TClientMsg;
 	isPong?: (msg: TServerMsg) => boolean;
-	onMessageReceived?: (msg: TServerMsg) => void;
+	getAckId?: (msg: TServerMsg) => string | undefined;
+	getSubscriptionResolvedKey?: (msg: TServerMsg) => string | undefined;
 	onSendIntent?: (params: TSendParams<TClientMsg>) => void;
 	onConnectionStateChange?: (state: TConnectionState) => void;
-	onReady?: () => void;
+	onReady?: (restoredKeys: string[]) => void;
 	onInFlightDrop?: (messages: { id: string; data: TClientMsg }[]) => void;
 	onLastUnsubscribe?: (key: string, data: TClientMsg | undefined) => void;
 	onDebug?: (event: TDebugEvent<TClientMsg, TServerMsg>) => void;
@@ -60,28 +86,28 @@ export type TDebugEventPayload<TClientMsg, TServerMsg> =
 	  }
 	| {
 			type: "message-received";
-			raw: string;
+			raw: TIncomingData;
 			deserialized: TServerMsg;
 			isPong: boolean;
 	  }
 	| {
 			type: "message-sent";
 			ackId: string | undefined;
-			raw: string;
+			raw: TWireData;
 			deserialized: TClientMsg;
 	  }
 	| {
 			type: "subscribe";
 			key: string;
 			refCount: number;
-			raw?: string;
+			raw?: TWireData;
 			deserialized?: TClientMsg;
 	  }
 	| {
 			type: "unsubscribe";
 			key: string;
 			refCount: number;
-			raw?: string;
+			raw?: TWireData;
 			deserialized?: TClientMsg;
 	  }
 	| { type: "in-flight-ack"; ackId: string }
@@ -89,7 +115,8 @@ export type TDebugEventPayload<TClientMsg, TServerMsg> =
 	| { type: "pending-subscription-resolved"; key: string }
 	| { type: "reconnect-scheduled"; attempt: number; delayMs: number }
 	| { type: "ready"; restoredKeys: string[] }
-	| { type: "deserialize-error"; raw: string; error: unknown }
+	| { type: "deserialize-error"; raw: TIncomingData; error: unknown }
+	| { type: "url-resolve-error"; error: unknown }
 	| { type: "dispose" };
 
 export type TDebugEvent<TClientMsg, TServerMsg> = {

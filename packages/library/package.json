@@ -1,6 +1,6 @@
 {
 	"name": "@luciodale/react-socket",
-	"version": "0.0.4",
+	"version": "0.2.0",
 	"author": "Lucio D'Alessandro",
 	"repository": {
 		"type": "git",
@@ -19,6 +19,10 @@
 		"./inspector": {
 			"types": "./dist/inspector/index.d.ts",
 			"import": "./dist/react-socket-inspector.es.js"
+		},
+		"./testing": {
+			"types": "./dist/testing/index.d.ts",
+			"import": "./dist/react-socket-testing.es.js"
 		}
 	},
 	"description": "Type safe React hooks for real time WebSocket communication. Automatic reconnection, optimistic updates, ref counted subscriptions, and offline message queuing out of the box.",

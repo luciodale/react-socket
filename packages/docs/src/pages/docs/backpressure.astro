@@ -1,0 +1,140 @@
+---
+import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
+import DocsPage from "../../layouts/DocsPage.astro";
+import { href } from "../../lib/link";
+
+export const prerender = true;
+
+const usageSample = `import { useSocketEventBatch } from "@luciodale/react-socket";
+
+function PriceTicker() {
+  const [latest, setLatest] = useState<Record<string, number>>({});
+
+  useSocketEventBatch(
+    manager,
+    "tick",
+    (msgs) => {
+      // One setState per flush, no matter how many ticks arrived.
+      setLatest((prev) => {
+        const next = { ...prev };
+        for (const m of msgs) next[m.symbol] = m.price;
+        return next;
+      });
+    },
+    { flushMs: 100 },
+  );
+
+  return <PriceGrid prices={latest} />;
+}`;
+
+const compareSample = `// Without batching: one re-render per tick. With 200 ticks per
+// second, that is 200 renders per second. The component dies.
+useSocketEvent(manager, "tick", (msg) => {
+  setLatest((prev) => ({ ...prev, [msg.symbol]: msg.price }));
+});
+
+// With batching: one re-render per flush window. With flushMs: 100,
+// that is 10 renders per second regardless of tick rate.
+useSocketEventBatch(
+  manager,
+  "tick",
+  (msgs) => setLatest((prev) => mergeTicks(prev, msgs)),
+  { flushMs: 100 },
+);`;
+
+const orderingSample = `useSocketEventBatch(
+  manager,
+  "stream-delta",
+  (msgs) => {
+    // Order is preserved within a batch, exactly as received.
+    for (const m of msgs) appendDelta(m.id, m.delta);
+  },
+  { flushMs: 16 },
+);`;
+---
+
+<DocsPage title="Backpressure">
+	<ContentSection label="Backpressure">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			A high-frequency stream that triggers a state update per event will
+			melt your UI thread. Quote feeds, stream tokens, telemetry, multiplayer
+			cursors — anything that arrives faster than React can paint —
+			needs batching at the receive boundary.
+		</p>
+		<p class="text-white/60 leading-relaxed">
+			<InlineCode>useSocketEventBatch</InlineCode> buffers events that match
+			a discriminator value and flushes the batch to your handler on a fixed
+			interval. One flush, one render.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Usage">
+		<CodeBlock code={usageSample} language="tsx" filename="PriceTicker.tsx" />
+		<Callout type="warning" title="flushMs is required">
+			There is no default. Pick a value that matches the responsiveness you
+			want, and accept that events arriving inside that window land in the
+			same batch.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Why this matters">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Without batching, every event causes a re-render. With it, you cap
+			renders at <InlineCode>1000 / flushMs</InlineCode>:
+		</p>
+		<CodeBlock code={compareSample} language="tsx" filename="example.tsx" />
+	</ContentSection>
+
+	<ContentSection label="Picking flushMs">
+		<ul class="list-disc list-inside space-y-2 text-white/60">
+			<li><strong>16ms (~60 renders / sec)</strong>: feels live. Use for cursors, scroll, or anything that should look continuous.</li>
+			<li><strong>50–100ms (10–20 / sec)</strong>: feels responsive but cheaper. Good for price tickers, dashboards.</li>
+			<li><strong>250ms+ (≤ 4 / sec)</strong>: clearly batched. Use for activity feeds where order matters but freshness does not.</li>
+		</ul>
+		<Callout type="tip" title="Match flushMs to perception, not bandwidth">
+			Server tick rate is irrelevant. Pick the slowest flush your UX
+			tolerates. Cheaper renders, less GC, less jank.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Order is preserved">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Events inside a batch arrive in the order the server sent them. Use
+			this for stream-delta or any other accumulating sequence:
+		</p>
+		<CodeBlock code={orderingSample} language="tsx" filename="streaming.tsx" />
+	</ContentSection>
+
+	<ContentSection label="What it does NOT do">
+		<ul class="list-disc list-inside space-y-2 text-white/60">
+			<li>It does not coalesce duplicates. If the server sends three updates for the same key in one window, your handler sees three entries. Dedupe in the handler.</li>
+			<li>It does not flush on unmount. Pending events in the buffer at unmount time are dropped. Persist anything you cannot afford to lose before unmounting.</li>
+			<li>It does not signal upstream. Truly congested servers need server-side flow control; client-side batching only protects the renderer.</li>
+		</ul>
+	</ContentSection>
+
+	<ContentSection label="When to skip it">
+		<ul class="list-disc list-inside space-y-2 text-white/60">
+			<li>Your stream is slow. If events arrive once a second, the per-event hook is fine and simpler.</li>
+			<li>Each event must update independent UI atomically. Batching collapses N events into one render — not the model you want for confirm-in-place flows.</li>
+			<li>You are using an external store (zustand, redux) that already coalesces. The store deals with churn; the React tree only renders on selector changes.</li>
+		</ul>
+	</ContentSection>
+
+	<ContentSection label="Next steps">
+		<ul class="space-y-2 text-white/60">
+			<li>
+				<a href={href("/docs/api")} class="text-accent hover:underline">API reference</a> — <InlineCode>useSocketEventBatch</InlineCode> signature
+			</li>
+			<li>
+				<a href={href("/docs/binary")} class="text-accent hover:underline">Binary frames</a> — pair batching with binary for high-throughput streams
+			</li>
+			<li>
+				<a href={href("/docs/testing")} class="text-accent hover:underline">Testing</a> — asserting on batch flushes with fake timers
+			</li>
+		</ul>
+	</ContentSection>
+</DocsPage>

@@ -6,7 +6,7 @@ import { MockTransport } from "../helpers/mock-transport";
 // ── Test types ──────────────────────────────────────────────────────
 
 type TTestClientMsg = Record<string, unknown>;
-type TTestServerMsg = Record<string, unknown>;
+type TTestServerMsg = { type: string } & Record<string, unknown>;
 
 const testSerialization = {
 	serialize: (msg: TTestClientMsg) => JSON.stringify(msg),
@@ -30,7 +30,7 @@ function createManager(overrides?: {
 	onReady?: () => void;
 	onInFlightDrop?: (messages: { id: string; data: TTestClientMsg }[]) => void;
 	onLastUnsubscribe?: (key: string, data: TTestClientMsg | undefined) => void;
-	ping?: TTestClientMsg;
+	ping?: () => TTestClientMsg;
 	isPong?: (msg: TTestServerMsg) => boolean;
 	pingIntervalMs?: number;
 	pongTimeoutMs?: number;
@@ -54,10 +54,6 @@ function createManager(overrides?: {
 		reconnectMaxDelayMs: 100,
 		ping: overrides?.ping,
 		isPong: overrides?.isPong,
-		onMessageReceived: (msg) => {
-			rawMessages.push(msg);
-			overrides?.onMessageReceived?.(msg);
-		},
 		onConnectionStateChange: (state) => {
 			states.push(state);
 			overrides?.onConnectionStateChange?.(state);
@@ -71,6 +67,11 @@ function createManager(overrides?: {
 			overrides?.onInFlightDrop?.(messages);
 		},
 		onLastUnsubscribe: overrides?.onLastUnsubscribe,
+	});
+
+	manager.addMessageListener((msg) => {
+		rawMessages.push(msg);
+		overrides?.onMessageReceived?.(msg);
 	});
 
 	return {
@@ -883,6 +884,209 @@ describe("WebSocketManager", () => {
 			// The new connection should work normally
 			transport.simulateOpen();
 			expect(states[states.length - 1]).toBe("connected");
+		});
+	});
+
+	describe("dynamic url", () => {
+		it("calls url function on connect and passes resolved url to transport", async () => {
+			const transport = new MockTransport();
+			const urlFn = vi.fn(() => "ws://test?token=abc");
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: urlFn,
+				transport,
+			});
+
+			manager.connect();
+			await vi.waitFor(() => {
+				expect(transport.connectCalls).toHaveLength(1);
+			});
+			expect(urlFn).toHaveBeenCalledTimes(1);
+			expect(transport.connectCalls[0].url).toBe("ws://test?token=abc");
+		});
+
+		it("awaits async url function before connecting", async () => {
+			const transport = new MockTransport();
+			let resolve!: (url: string) => void;
+			const pending = new Promise<string>((r) => {
+				resolve = r;
+			});
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: () => pending,
+				transport,
+			});
+
+			manager.connect();
+			expect(transport.connectCalls).toHaveLength(0);
+
+			resolve("ws://test?token=xyz");
+			await vi.waitFor(() => {
+				expect(transport.connectCalls).toHaveLength(1);
+			});
+			expect(transport.connectCalls[0].url).toBe("ws://test?token=xyz");
+		});
+
+		it("calls url function again on every reconnect (token refresh)", async () => {
+			const transport = new MockTransport();
+			let token = "t1";
+			const urlFn = vi.fn(() => `ws://test?token=${token}`);
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: urlFn,
+				transport,
+				reconnectBaseDelayMs: 10,
+				reconnectMaxDelayMs: 100,
+				reconnectMaxAttempts: 3,
+			});
+
+			manager.connect();
+			await vi.waitFor(() => {
+				expect(transport.connectCalls).toHaveLength(1);
+			});
+			expect(transport.connectCalls[0].url).toBe("ws://test?token=t1");
+
+			token = "t2";
+			manager.forceReconnect();
+			await vi.waitFor(() => {
+				expect(transport.connectCalls).toHaveLength(2);
+			});
+			expect(urlFn).toHaveBeenCalledTimes(2);
+			expect(transport.connectCalls[1].url).toBe("ws://test?token=t2");
+		});
+
+		it("calls url function on scheduled reconnect after drop", async () => {
+			const transport = new MockTransport();
+			let token = "t1";
+			const urlFn = vi.fn(() => `ws://test?token=${token}`);
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: urlFn,
+				transport,
+				reconnectBaseDelayMs: 10,
+				reconnectMaxDelayMs: 100,
+				reconnectMaxAttempts: 3,
+			});
+
+			manager.connect();
+			await vi.waitFor(() => {
+				expect(transport.connectCalls).toHaveLength(1);
+			});
+			transport.simulateOpen();
+
+			token = "t2";
+			transport.simulateClose(1006);
+			await vi.advanceTimersByTimeAsync(200);
+
+			expect(urlFn).toHaveBeenCalledTimes(2);
+			expect(transport.connectCalls[1].url).toBe("ws://test?token=t2");
+		});
+
+		it("emits url-resolve-error and schedules reconnect on sync throw", async () => {
+			const transport = new MockTransport();
+			const debugEvents: string[] = [];
+			let shouldFail = true;
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: () => {
+					if (shouldFail) throw new Error("token refresh failed");
+					return "ws://test";
+				},
+				transport,
+				reconnectBaseDelayMs: 10,
+				reconnectMaxDelayMs: 100,
+				reconnectMaxAttempts: 3,
+				onDebug: (e) => debugEvents.push(e.type),
+			});
+
+			manager.connect();
+			await vi.waitFor(() => {
+				expect(debugEvents).toContain("url-resolve-error");
+			});
+			expect(transport.connectCalls).toHaveLength(0);
+
+			shouldFail = false;
+			await vi.advanceTimersByTimeAsync(200);
+			expect(transport.connectCalls).toHaveLength(1);
+		});
+
+		it("emits url-resolve-error and schedules reconnect on async rejection", async () => {
+			const transport = new MockTransport();
+			const debugEvents: string[] = [];
+			let shouldFail = true;
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: async () => {
+					if (shouldFail) throw new Error("token refresh failed");
+					return "ws://test";
+				},
+				transport,
+				reconnectBaseDelayMs: 10,
+				reconnectMaxDelayMs: 100,
+				reconnectMaxAttempts: 3,
+				onDebug: (e) => debugEvents.push(e.type),
+			});
+
+			manager.connect();
+			await vi.waitFor(() => {
+				expect(debugEvents).toContain("url-resolve-error");
+			});
+			expect(transport.connectCalls).toHaveLength(0);
+
+			shouldFail = false;
+			await vi.advanceTimersByTimeAsync(200);
+			expect(transport.connectCalls).toHaveLength(1);
+		});
+
+		it("aborts pending url resolution when disposed", async () => {
+			const transport = new MockTransport();
+			let resolve!: (url: string) => void;
+			const pending = new Promise<string>((r) => {
+				resolve = r;
+			});
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: () => pending,
+				transport,
+			});
+
+			manager.connect();
+			manager.dispose();
+
+			resolve("ws://test?token=late");
+			await vi.advanceTimersByTimeAsync(50);
+			expect(transport.connectCalls).toHaveLength(0);
+		});
+
+		it("supersedes stale url resolution on forceReconnect", async () => {
+			const transport = new MockTransport();
+			const pendings: Array<(url: string) => void> = [];
+			const urls: string[] = ["ws://test?token=stale", "ws://test?token=fresh"];
+			let callIndex = 0;
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: () =>
+					new Promise<string>((r) => {
+						const expected = urls[callIndex++];
+						pendings.push(() => r(expected));
+					}),
+				transport,
+			});
+
+			manager.connect();
+			manager.forceReconnect();
+
+			// Resolve the first (stale) url first; it should be ignored
+			pendings[0]();
+			await vi.advanceTimersByTimeAsync(10);
+			expect(transport.connectCalls).toHaveLength(0);
+
+			// Resolve the second (fresh) url; it should be used
+			pendings[1]();
+			await vi.waitFor(() => {
+				expect(transport.connectCalls).toHaveLength(1);
+			});
+			expect(transport.connectCalls[0].url).toBe("ws://test?token=fresh");
 		});
 	});
 });

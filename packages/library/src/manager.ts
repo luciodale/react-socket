@@ -11,15 +11,26 @@ import type {
 	TConnectionState,
 	TDebugEvent,
 	TDebugEventPayload,
+	TIncomingData,
 	TManagerConfig,
 	TSendParams,
+	TWireData,
 } from "./types";
 
-export class WebSocketManager<TClientMsg, TServerMsg> {
-	private readonly url: string;
+export class WebSocketManager<
+	TClientMsg,
+	TServerMsg extends Record<TKey, string>,
+	TKey extends string = "type",
+	TWire extends TWireData = string,
+	TIncoming extends TIncomingData = string,
+> {
+	readonly discriminator: TKey;
+
+	private readonly urlStatic: string | null;
+	private readonly urlDynamic: (() => string | Promise<string>) | null;
 	private readonly transport: IWebSocketTransport;
-	private readonly serialize: (msg: TClientMsg) => string;
-	private readonly deserialize: (raw: string) => TServerMsg;
+	private readonly serialize: (msg: TClientMsg) => TWire;
+	private readonly deserialize: (raw: TIncoming) => TServerMsg;
 	private readonly pingIntervalMs: number;
 	private readonly pongTimeoutMs: number;
 	private readonly reconnectMaxAttempts: number;
@@ -28,35 +39,61 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 
 	private readonly ping: (() => TClientMsg) | undefined;
 	private readonly isPong: ((msg: TServerMsg) => boolean) | undefined;
+	private readonly getAckIdCb:
+		| ((msg: TServerMsg) => string | undefined)
+		| undefined;
+	private readonly getSubscriptionResolvedKeyCb:
+		| ((msg: TServerMsg) => string | undefined)
+		| undefined;
 
-	private readonly onMessageReceivedCb: TManagerConfig<
-		TClientMsg,
-		TServerMsg
-	>["onMessageReceived"];
 	private readonly onSendIntentCb: TManagerConfig<
 		TClientMsg,
-		TServerMsg
+		TServerMsg,
+		TKey
 	>["onSendIntent"];
 	private readonly onConnectionStateChange: TManagerConfig<
 		TClientMsg,
-		TServerMsg
+		TServerMsg,
+		TKey
 	>["onConnectionStateChange"];
-	private readonly onReady: TManagerConfig<TClientMsg, TServerMsg>["onReady"];
+	private readonly onReady: TManagerConfig<
+		TClientMsg,
+		TServerMsg,
+		TKey
+	>["onReady"];
 	private readonly onInFlightDrop: TManagerConfig<
 		TClientMsg,
-		TServerMsg
+		TServerMsg,
+		TKey
 	>["onInFlightDrop"];
 	private readonly onLastUnsubscribe: TManagerConfig<
 		TClientMsg,
-		TServerMsg
+		TServerMsg,
+		TKey
 	>["onLastUnsubscribe"];
-	private readonly onDebugCb: TManagerConfig<TClientMsg, TServerMsg>["onDebug"];
+	private readonly onDebugCb: TManagerConfig<
+		TClientMsg,
+		TServerMsg,
+		TKey
+	>["onDebug"];
 
 	private readonly subscriptionRefCounts = new Map<string, number>();
 	private readonly subscriptionData = new Map<string, TClientMsg | undefined>();
 	private readonly pendingSubscriptions = new Set<string>();
 	private readonly inFlightMessages = new Map<string, TClientMsg>();
 	private readonly connectionStateListeners = new Set<() => void>();
+	private readonly messageListeners = new Set<(msg: TServerMsg) => void>();
+	private readonly pendingSubscriptionListeners = new Set<() => void>();
+	private readonly sendIntentListeners = new Set<
+		(params: TSendParams<TClientMsg>) => void
+	>();
+	private readonly inFlightDropListeners = new Set<
+		(messages: { id: string; data: TClientMsg }[]) => void
+	>();
+	private readonly readyListeners = new Set<(restoredKeys: string[]) => void>();
+	private readonly lastUnsubscribeListeners = new Set<
+		(key: string, data: TClientMsg | undefined) => void
+	>();
 	private readonly debugListeners = new Set<
 		(event: TDebugEvent<TClientMsg, TServerMsg>) => void
 	>();
@@ -70,12 +107,26 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 	private intentionalClose = false;
 	private disposed = false;
 	private debugEventCounter = 0;
+	private connectAttemptId = 0;
 
-	constructor(config: TManagerConfig<TClientMsg, TServerMsg>) {
-		this.url = config.url;
+	constructor(
+		config: TManagerConfig<TClientMsg, TServerMsg, TKey, TWire, TIncoming>,
+	) {
+		const configUrl = config.url;
+		if (typeof configUrl === "function") {
+			this.urlStatic = null;
+			this.urlDynamic = configUrl;
+		} else {
+			this.urlStatic = configUrl;
+			this.urlDynamic = null;
+		}
 		this.serialize = config.serialize;
 		this.deserialize = config.deserialize;
+		this.discriminator = (config.discriminator ?? "type") as TKey;
 		this.transport = config.transport ?? createTransport();
+		if (config.binaryType !== undefined) {
+			this.transport.binaryType = config.binaryType;
+		}
 		this.pingIntervalMs = config.pingIntervalMs ?? PING_INTERVAL_MS;
 		this.pongTimeoutMs = config.pongTimeoutMs ?? PONG_TIMEOUT_MS;
 		this.reconnectMaxAttempts =
@@ -86,7 +137,8 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 			config.reconnectMaxDelayMs ?? RECONNECT_MAX_DELAY_MS;
 		this.ping = config.ping;
 		this.isPong = config.isPong;
-		this.onMessageReceivedCb = config.onMessageReceived;
+		this.getAckIdCb = config.getAckId;
+		this.getSubscriptionResolvedKeyCb = config.getSubscriptionResolvedKey;
 		this.onSendIntentCb = config.onSendIntent;
 		this.onConnectionStateChange = config.onConnectionStateChange;
 		this.onReady = config.onReady;
@@ -116,15 +168,46 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 		this.transport.onmessage = (e) => this.handleMessage(e);
 		this.transport.onerror = () => {};
 
-		this.transport.connect(
-			this.url,
-			this.protocols.length ? this.protocols : undefined,
-		);
+		this.initiateTransportConnect(++this.connectAttemptId);
 
 		if (typeof window !== "undefined") {
 			window.addEventListener("online", this.handleOnline);
 			window.addEventListener("offline", this.handleOffline);
 		}
+	}
+
+	private initiateTransportConnect(attemptId: number): void {
+		if (this.urlStatic !== null) {
+			this.transport.connect(
+				this.urlStatic,
+				this.protocols.length ? this.protocols : undefined,
+			);
+			return;
+		}
+		this.resolveDynamicUrl(attemptId);
+	}
+
+	private async resolveDynamicUrl(attemptId: number): Promise<void> {
+		const resolver = this.urlDynamic;
+		if (!resolver) return;
+		let resolvedUrl: string;
+		try {
+			resolvedUrl = await resolver();
+		} catch (error) {
+			if (attemptId !== this.connectAttemptId) return;
+			this.emitDebug({ type: "url-resolve-error", error });
+			if (this.intentionalClose || this.disposed) return;
+			this.scheduleReconnect();
+			return;
+		}
+
+		if (attemptId !== this.connectAttemptId) return;
+		if (this.intentionalClose || this.disposed) return;
+
+		this.transport.connect(
+			resolvedUrl,
+			this.protocols.length ? this.protocols : undefined,
+		);
 	}
 
 	disconnect(): void {
@@ -138,6 +221,7 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 	forceReconnect(): void {
 		if (this.disposed) return;
 		this.clearTimers();
+		this.notifyPendingSubscriptionsCleared();
 		this.pendingSubscriptions.clear();
 
 		if (this.inFlightMessages.size > 0) {
@@ -146,6 +230,7 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 				data,
 			}));
 			this.onInFlightDrop?.(messages);
+			for (const listener of this.inFlightDropListeners) listener(messages);
 			this.emitDebug({
 				type: "in-flight-drop",
 				ids: messages.map((m) => m.id),
@@ -174,6 +259,7 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 		this.disconnect();
 		this.subscriptionRefCounts.clear();
 		this.subscriptionData.clear();
+		this.notifyPendingSubscriptionsCleared();
 		this.pendingSubscriptions.clear();
 		this.inFlightMessages.clear();
 		this.emitDebug({ type: "dispose" });
@@ -209,11 +295,15 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 			const storedData = this.subscriptionData.get(key);
 			this.subscriptionRefCounts.delete(key);
 			this.subscriptionData.delete(key);
-			this.pendingSubscriptions.delete(key);
+			const hadPending = this.pendingSubscriptions.delete(key);
+			if (hadPending) this.notifyPendingSubscriptionListeners();
 			if (data && this.connectionState === "connected") {
 				this.rawSend(this.serialize(data));
 			}
 			this.onLastUnsubscribe?.(key, storedData);
+			for (const listener of this.lastUnsubscribeListeners) {
+				listener(key, storedData);
+			}
 		} else {
 			this.subscriptionRefCounts.set(key, next);
 		}
@@ -236,7 +326,23 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 		return this.pendingSubscriptions;
 	}
 
+	hasPendingSubscription(key: string): boolean {
+		return this.pendingSubscriptions.has(key);
+	}
+
+	subscribeToPendingSubscriptions(listener: () => void): () => void {
+		this.pendingSubscriptionListeners.add(listener);
+		return () => {
+			this.pendingSubscriptionListeners.delete(listener);
+		};
+	}
+
 	// ── In-flight ─────────────────────────────────────────────────────
+	//
+	// Prefer wiring `getAckId` / `getSubscriptionResolvedKey` in the manager
+	// config so the library calls these automatically on incoming messages.
+	// These are only exposed for the rare case where you need to resolve
+	// imperatively (e.g. tests, non-standard flows).
 
 	ackInFlight(ackId: string): void {
 		this.inFlightMessages.delete(ackId);
@@ -244,7 +350,8 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 	}
 
 	resolvePendingSubscription(key: string): void {
-		this.pendingSubscriptions.delete(key);
+		const hadPending = this.pendingSubscriptions.delete(key);
+		if (hadPending) this.notifyPendingSubscriptionListeners();
 		this.emitDebug({ type: "pending-subscription-resolved", key });
 	}
 
@@ -252,6 +359,7 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 
 	send(params: TSendParams<TClientMsg>): boolean {
 		this.onSendIntentCb?.(params);
+		for (const listener of this.sendIntentListeners) listener(params);
 		if (this.connectionState !== "connected") return false;
 		const serialized = this.serialize(params.data);
 		const sent = this.rawSend(serialized);
@@ -279,6 +387,49 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 		this.connectionStateListeners.add(listener);
 		return () => {
 			this.connectionStateListeners.delete(listener);
+		};
+	}
+
+	// ── Observable messages ───────────────────────────────────────────
+
+	addMessageListener(cb: (msg: TServerMsg) => void): () => void {
+		this.messageListeners.add(cb);
+		return () => {
+			this.messageListeners.delete(cb);
+		};
+	}
+
+	addSendIntentListener(
+		cb: (params: TSendParams<TClientMsg>) => void,
+	): () => void {
+		this.sendIntentListeners.add(cb);
+		return () => {
+			this.sendIntentListeners.delete(cb);
+		};
+	}
+
+	addInFlightDropListener(
+		cb: (messages: { id: string; data: TClientMsg }[]) => void,
+	): () => void {
+		this.inFlightDropListeners.add(cb);
+		return () => {
+			this.inFlightDropListeners.delete(cb);
+		};
+	}
+
+	addReadyListener(cb: (restoredKeys: string[]) => void): () => void {
+		this.readyListeners.add(cb);
+		return () => {
+			this.readyListeners.delete(cb);
+		};
+	}
+
+	addLastUnsubscribeListener(
+		cb: (key: string, data: TClientMsg | undefined) => void,
+	): () => void {
+		this.lastUnsubscribeListeners.add(cb);
+		return () => {
+			this.lastUnsubscribeListeners.delete(cb);
 		};
 	}
 
@@ -330,12 +481,14 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 		this.setConnectionState("connected");
 		this.startPingInterval();
 		const restoredKeys = this.restoreSubscriptions();
-		this.onReady?.();
+		this.onReady?.(restoredKeys);
+		for (const listener of this.readyListeners) listener(restoredKeys);
 		this.emitDebug({ type: "ready", restoredKeys });
 	}
 
 	private handleClose(event: CloseEvent): void {
 		this.clearTimers();
+		this.notifyPendingSubscriptionsCleared();
 		this.pendingSubscriptions.clear();
 
 		if (this.inFlightMessages.size > 0) {
@@ -344,6 +497,7 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 				data,
 			}));
 			this.onInFlightDrop?.(messages);
+			for (const listener of this.inFlightDropListeners) listener(messages);
 			this.emitDebug({
 				type: "in-flight-drop",
 				ids: messages.map((m) => m.id),
@@ -365,7 +519,7 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 	}
 
 	private handleMessage(event: MessageEvent): void {
-		const raw = event.data as string;
+		const raw = event.data as TIncoming;
 		let parsed: TServerMsg;
 		try {
 			parsed = this.deserialize(raw);
@@ -391,7 +545,16 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 			deserialized: parsed,
 			isPong: false,
 		});
-		this.onMessageReceivedCb?.(parsed);
+
+		const ackId = this.getAckIdCb?.(parsed);
+		if (ackId !== undefined) this.ackInFlight(ackId);
+
+		const subKey = this.getSubscriptionResolvedKeyCb?.(parsed);
+		if (subKey !== undefined) this.resolvePendingSubscription(subKey);
+
+		for (const listener of this.messageListeners) {
+			listener(parsed);
+		}
 	}
 
 	private handleOnline(): void {
@@ -441,10 +604,7 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 			this.transport.onclose = (e) => this.handleClose(e);
 			this.transport.onmessage = (e) => this.handleMessage(e);
 			this.transport.onerror = () => {};
-			this.transport.connect(
-				this.url,
-				this.protocols.length ? this.protocols : undefined,
-			);
+			this.initiateTransportConnect(++this.connectAttemptId);
 		}, delay);
 	}
 
@@ -490,7 +650,7 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 
 	// ── Private: helpers ──────────────────────────────────────────────
 
-	private rawSend(data: string): boolean {
+	private rawSend(data: TWire): boolean {
 		try {
 			this.transport.send(data);
 			return true;
@@ -502,7 +662,9 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 	private sendSubscribe(key: string): void {
 		if (this.connectionState !== "connected") return;
 		const data = this.subscriptionData.get(key);
+		const added = !this.pendingSubscriptions.has(key);
 		this.pendingSubscriptions.add(key);
+		if (added) this.notifyPendingSubscriptionListeners();
 		if (data) {
 			this.rawSend(this.serialize(data));
 		}
@@ -517,6 +679,15 @@ export class WebSocketManager<TClientMsg, TServerMsg> {
 			listener();
 		}
 		this.emitDebug({ type: "connection-state-change", from, to: state });
+	}
+
+	private notifyPendingSubscriptionListeners(): void {
+		for (const listener of this.pendingSubscriptionListeners) listener();
+	}
+
+	private notifyPendingSubscriptionsCleared(): void {
+		if (this.pendingSubscriptions.size === 0) return;
+		this.notifyPendingSubscriptionListeners();
 	}
 
 	private emitDebug(payload: TDebugEventPayload<TClientMsg, TServerMsg>): void {

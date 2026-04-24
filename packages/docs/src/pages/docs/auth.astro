@@ -1,0 +1,310 @@
+---
+import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
+import DocsPage from "../../layouts/DocsPage.astro";
+import { href } from "../../lib/link";
+
+export const prerender = true;
+
+// Code samples live in the frontmatter so that backticks + TS generics
+// inside the same literal don't trip the astro/esbuild JSX parser.
+const staticTokenSample = `const token = getAccessToken();
+
+const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  url: \`wss://api.example.com/ws?token=\${token}\`,
+  serialize: (msg) => JSON.stringify(msg),
+  deserialize: (raw) => JSON.parse(raw),
+});`;
+
+const dynamicTokenSample = `const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  url: () => \`wss://api.example.com/ws?token=\${tokenStore.get()}\`,
+  serialize: (msg) => JSON.stringify(msg),
+  deserialize: (raw) => JSON.parse(raw),
+});`;
+
+const asyncTokenSample = `const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  url: async () => {
+    const token = await auth.getValidAccessToken();
+    return \`wss://api.example.com/ws?token=\${token}\`;
+  },
+  // ...
+});`;
+
+const refreshFlowSample = `const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  url: async () => {
+    const token = await auth.getValidAccessToken();
+    return \`wss://api.example.com/ws?token=\${token}\`;
+  },
+  serialize: (msg) => JSON.stringify(msg),
+  deserialize: (raw) => JSON.parse(raw),
+
+  onConnectionStateChange(state) {
+    // Optional: react to reconnect loops here
+  },
+});
+
+// Elsewhere: a server message tells you the token is dead
+function handleUnauthorized() {
+  auth.invalidateAccessToken();
+  manager.forceReconnect();
+}`;
+
+const authStateSample = `type TAuthState = { authed: boolean; userId: string | null };
+
+const AuthContext = createContext<TAuthState>({ authed: false, userId: null });
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [state, setState] = useState<TAuthState>({ authed: false, userId: null });
+
+  useSocketEvent(manager, "auth-ok", (msg) => {
+    setState({ authed: true, userId: msg.userId });
+  });
+
+  useSocketEvent(manager, "auth-expired", () => {
+    setState((prev) => ({ ...prev, authed: false }));
+  });
+
+  useSocketEvent(manager, "unauthorized", () => {
+    setState({ authed: false, userId: null });
+  });
+
+  return <AuthContext.Provider value={state}>{children}</AuthContext.Provider>;
+}
+
+export function useAuth() {
+  return useContext(AuthContext);
+}
+
+function ChatInput() {
+  const { authed } = useAuth();
+  const { send } = useSocketSend(manager);
+
+  return (
+    <input
+      disabled={!authed}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && authed) {
+          send({ type: "message", text: e.currentTarget.value });
+        }
+      }}
+    />
+  );
+}`;
+---
+
+<DocsPage title="Authentication">
+	<ContentSection label="Authentication">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Browser WebSockets do not support custom headers, so you cannot attach an
+			<InlineCode>Authorization: Bearer ...</InlineCode> header the way you would with
+			<InlineCode>fetch</InlineCode>. Four standard workarounds, ordered by how
+			defensible each one is:
+		</p>
+		<ul class="list-disc list-inside space-y-2 text-white/60 mb-4">
+			<li><strong>First message (recommended):</strong> open the socket, then send the token as the first frame. Tokens never appear in URLs, logs, or proxies, and the server can re-challenge mid-connection without a reconnect.</li>
+			<li><strong>HTTP-only cookie:</strong> the browser sends the session cookie automatically on upgrade. Safest default when your server supports it.</li>
+			<li><strong>Subprotocol:</strong> pass the token as a WebSocket subprotocol. Cleaner than the query string but requires server negotiation.</li>
+			<li><strong>Query string:</strong> simplest. Visible in server and proxy logs. Use only with short-lived access tokens.</li>
+		</ul>
+		<p class="text-white/60 leading-relaxed">
+			First-message auth is covered first below because it is the pattern most
+			production apps converge on. The URL-based sections follow for smaller or
+			internal apps where the extra round-trip is not worth it.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="First-message authentication">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Open the socket with no credentials, then send an auth frame before anything
+			else. <InlineCode>onReady</InlineCode> fires on every (re)connect, after the
+			library has replayed subscriptions, so it is the right seam for the first
+			message:
+		</p>
+		<CodeBlock
+			code={`type TClientMsg =
+  | { type: "auth"; token: string }
+  | { type: "message"; text: string };
+
+type TServerMsg =
+  | { type: "auth-ok"; userId: string }
+  | { type: "auth-expired" }
+  | { type: "unauthorized"; reason: string }
+  | { type: "message"; text: string };
+
+const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  url: "wss://api.example.com/ws",
+  serialize: (msg) => JSON.stringify(msg),
+  deserialize: (raw) => JSON.parse(raw),
+
+  async onReady() {
+    const token = await auth.getValidAccessToken();
+    manager.send({ data: { type: "auth", token } });
+  },
+});`}
+			language="tsx"
+			filename="manager.ts"
+		/>
+		<p class="text-white/60 mt-4 mb-4 leading-relaxed">
+			Track the authed state so components can gate reads and writes until the
+			server confirms:
+		</p>
+		<CodeBlock code={authStateSample} language="tsx" filename="AuthProvider.tsx" />
+		<Callout type="tip" title="Why onReady, not useEffect">
+			<InlineCode>onReady</InlineCode> fires after every reconnect too, so you
+			re-auth automatically when the socket drops and comes back. A
+			<InlineCode>useEffect</InlineCode> on mount would only fire once.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Server challenge / mid-session re-auth">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			When a server cannot pre-validate the session (for example because the
+			access token expires mid-connection), it can ask the client to re-auth
+			without closing the socket. Treat the challenge as just another typed
+			server message:
+		</p>
+		<CodeBlock
+			code={`type TServerMsg =
+  | { type: "auth-required" }
+  | { type: "auth-expired" }
+  | { type: "auth-ok"; userId: string }
+  | { type: "unauthorized"; reason: string };
+
+function ReauthBridge() {
+  useSocketEvent(manager, "auth-required", async () => {
+    const token = await auth.getValidAccessToken();
+    manager.send({ data: { type: "auth", token } });
+  });
+
+  useSocketEvent(manager, "auth-expired", async () => {
+    const token = await auth.refreshAccessToken();
+    manager.send({ data: { type: "auth", token } });
+  });
+
+  return null;
+}`}
+			language="tsx"
+			filename="ReauthBridge.tsx"
+		/>
+		<Callout type="warning" title="Queue writes during re-auth">
+			Between <InlineCode>auth-expired</InlineCode> and the next
+			<InlineCode>auth-ok</InlineCode>, the server will likely reject anything
+			except the <InlineCode>auth</InlineCode> message. Flip your
+			<InlineCode>authed</InlineCode> flag to <InlineCode>false</InlineCode> on
+			<InlineCode>auth-expired</InlineCode> so the UI gates writes until the
+			next ok.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Static token (simple)">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			If the token is available at manager construction and does not change while the
+			tab is open, pass it as part of the URL string:
+		</p>
+		<CodeBlock code={staticTokenSample} language="tsx" filename="manager.ts" />
+		<Callout type="warning" title="Reconnect uses the captured token">
+			The URL is captured once when the manager is built. If the token later
+			expires or rotates, you need the dynamic form below so reconnects pick up the fresh value.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Dynamic token (refresh-safe)">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Pass a function as <InlineCode>url</InlineCode>. The manager calls it on every
+			connect and every reconnect, so it always resolves against the latest token:
+		</p>
+		<CodeBlock code={dynamicTokenSample} language="tsx" filename="manager.ts" />
+		<p class="text-white/60 mt-4 mb-4 leading-relaxed">
+			The function can be async. Returning a <InlineCode>{"Promise<string>"}</InlineCode>
+			is the way to wait for a fresh token before the socket opens:
+		</p>
+		<CodeBlock code={asyncTokenSample} language="tsx" filename="manager.ts" />
+		<Callout type="tip" title="Resolution failures trigger reconnect">
+			If the URL function throws or rejects, the manager emits a <InlineCode>url-resolve-error</InlineCode>
+			debug event and schedules a reconnect with backoff. This is useful when the token endpoint is
+			temporarily unavailable.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Token refresh flow">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			When your server rejects a stale token (for example by closing with a custom code),
+			refresh the token and call <InlineCode>forceReconnect()</InlineCode>. Because the URL
+			is a function, the new connection picks up the fresh value automatically:
+		</p>
+		<CodeBlock code={refreshFlowSample} language="tsx" filename="auth.ts" />
+		<p class="text-white/60 mt-4 leading-relaxed">
+			If your server closes the socket with a non-1000 code, the manager reconnects on
+			its own and calls the URL function again. You only need
+			<InlineCode>forceReconnect()</InlineCode> when the server cannot or will not close
+			the socket for you (for example if it just sends an <InlineCode>unauthorized</InlineCode> message).
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Reacting to server-side unauth">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			If the server sends a typed <InlineCode>unauthorized</InlineCode> message before
+			closing, handle it at the edge where messages are received:
+		</p>
+		<CodeBlock
+			code={`type TServerMsg =
+  | { type: "unauthorized"; reason: string }
+  | { type: "data"; /* ... */ };
+
+useSocketEvent(manager, "unauthorized", async () => {
+  await auth.refreshAccessToken();
+  manager.forceReconnect();
+});`}
+			language="tsx"
+			filename="UnauthorizedHandler.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Subprotocol authentication">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Some servers accept a token through the WebSocket subprotocol header. Use
+			<InlineCode>manager.addProtocols()</InlineCode> before calling <InlineCode>connect()</InlineCode>:
+		</p>
+		<CodeBlock
+			code={`const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  url: "wss://api.example.com/ws",
+  serialize: (msg) => JSON.stringify(msg),
+  deserialize: (raw) => JSON.parse(raw),
+});
+
+manager.addProtocols(["bearer", token]);
+manager.connect();`}
+			language="tsx"
+			filename="manager.ts"
+		/>
+		<Callout type="warning" title="Server must negotiate the subprotocol">
+			Browsers will close the connection if the server does not echo one of the
+			offered subprotocols back. Make sure your server agrees on the value.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Security notes">
+		<ul class="list-disc list-inside space-y-2 text-white/60">
+			<li>Prefer <InlineCode>wss://</InlineCode> in production so tokens are encrypted in transit.</li>
+			<li>Tokens in query strings can end up in proxy logs. Use short-lived access tokens.</li>
+			<li>Do not ship long-lived refresh tokens to the browser. Refresh over HTTPS, then pass the access token to the socket URL.</li>
+			<li>HTTP-only cookies avoid touching the URL at all and are the safest default if your server supports them.</li>
+		</ul>
+	</ContentSection>
+
+	<ContentSection label="Next steps">
+		<ul class="space-y-2 text-white/60">
+			<li>
+				<a href={href("/docs/reconnection")} class="text-accent hover:underline">Reconnection</a> — how backoff and state changes interact with token refresh
+			</li>
+			<li>
+				<a href={href("/docs/configuration")} class="text-accent hover:underline">Configuration</a> — full list of manager options
+			</li>
+			<li>
+				<a href={href("/docs/error-handling")} class="text-accent hover:underline">Error handling</a> — surfacing auth failures to users
+			</li>
+		</ul>
+	</ContentSection>
+</DocsPage>

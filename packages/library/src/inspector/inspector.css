@@ -428,7 +428,8 @@
 	color: var(--rsi-orange);
 }
 
-.rsi-event-type[data-type="deserialize-error"] {
+.rsi-event-type[data-type="deserialize-error"],
+.rsi-event-type[data-type="url-resolve-error"] {
 	color: var(--rsi-error);
 }
 

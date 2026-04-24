@@ -1,7 +1,9 @@
-import type { IWebSocketTransport } from "./types";
+import type { IWebSocketTransport, TWireData } from "./types";
 
 export class BrowserWebSocketTransport implements IWebSocketTransport {
 	private ws: WebSocket | null = null;
+
+	binaryType?: "blob" | "arraybuffer";
 
 	onopen: ((event: Event) => void) | null = null;
 	onclose: ((event: CloseEvent) => void) | null = null;
@@ -15,6 +17,9 @@ export class BrowserWebSocketTransport implements IWebSocketTransport {
 	connect(url: string, protocols?: string | string[]): void {
 		this.ws = new WebSocket(url, protocols);
 		const current = this.ws;
+		if (this.binaryType) {
+			current.binaryType = this.binaryType;
+		}
 		current.onopen = (e) => {
 			if (this.ws !== current) return;
 			this.onopen?.(e);
@@ -39,7 +44,7 @@ export class BrowserWebSocketTransport implements IWebSocketTransport {
 		ws?.close(code, reason);
 	}
 
-	send(data: string): void {
+	send(data: TWireData): void {
 		this.ws?.send(data);
 	}
 }

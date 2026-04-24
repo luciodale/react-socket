@@ -1,0 +1,199 @@
+---
+import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
+import DocsPage from "../../layouts/DocsPage.astro";
+import { href } from "../../lib/link";
+
+export const prerender = true;
+---
+
+<DocsPage title="Error handling">
+	<ContentSection label="Error handling">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Real connections fail. The tab goes offline, the browser throttles
+			background sockets, a stale token gets rejected, the server restarts.
+			react-socket surfaces these as three concrete things you can react to:
+		</p>
+		<ul class="list-disc list-inside space-y-2 text-white/60">
+			<li><InlineCode>send()</InlineCode> returns <InlineCode>false</InlineCode> when the socket is not connected</li>
+			<li><InlineCode>onDebug</InlineCode> emits typed events for deserialize failures, URL resolve failures, in-flight drops, and more</li>
+			<li>Standard React error boundaries still apply to any component that reads socket state</li>
+		</ul>
+	</ContentSection>
+
+	<ContentSection label="Send while offline">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			<InlineCode>send()</InlineCode> returns a boolean so you can show a
+			failure state inline without reaching into the connection state:
+		</p>
+		<CodeBlock
+			code={`const { send } = useSocketSend(manager);
+
+function handleSend(text: string) {
+  const ok = send({ type: "message", text });
+  if (!ok) {
+    toast.error("You're offline. Your message was not sent.");
+  }
+}`}
+			language="tsx"
+			filename="SendWithFallback.tsx"
+		/>
+		<Callout type="tip" title="Queue instead of dropping">
+			If you want the message to go out on the next reconnect, pair
+			<InlineCode>onSendIntent</InlineCode> with
+			<InlineCode>onInFlightDrop</InlineCode> to capture and replay. The
+			<a href={href("/docs/undelivered-sync")} class="text-accent hover:underline">Undelivered Sync</a>
+			guide shows the full pattern.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Deserialize failures">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			If your <InlineCode>deserialize</InlineCode> function throws on a frame,
+			the manager emits a <InlineCode>deserialize-error</InlineCode> debug event
+			and skips it. Subscribe to see these instead of silent drops:
+		</p>
+		<CodeBlock
+			code={`const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  url: getWsUrl(),
+  serialize: (msg) => JSON.stringify(msg),
+  deserialize: (raw) => JSON.parse(raw),
+
+  onDebug(event) {
+    if (event.type === "deserialize-error") {
+      reportError(event.error, { raw: event.raw });
+    }
+  },
+});`}
+			language="tsx"
+			filename="manager.ts"
+		/>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			The same callback is how you audit everything else: connection state
+			changes, reconnect attempts, subscribe and unsubscribe, in-flight
+			acks and drops. Good place to bridge to Sentry or your own logger.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="URL resolution failures">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			If your <InlineCode>url</InlineCode> function throws or rejects (for example
+			because the token endpoint is down), the manager emits a
+			<InlineCode>url-resolve-error</InlineCode> debug event and schedules a
+			reconnect with backoff:
+		</p>
+		<CodeBlock
+			code={`onDebug(event) {
+  if (event.type === "url-resolve-error") {
+    // Token refresh failed. The manager will retry with backoff.
+    // Surface a message so the user knows we are trying.
+    status.setRefreshingAuth(true);
+  }
+}`}
+			language="tsx"
+			filename="manager.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Connection state as UX signal">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			The <InlineCode>useSocketConnectionState</InlineCode> hook gives you the
+			only piece of state most UIs need. Map it to your own labels and
+			disable actions that depend on a live socket:
+		</p>
+		<CodeBlock
+			code={`function ChatInput() {
+  const state = useSocketConnectionState(manager);
+  const connected = state === "connected";
+
+  return (
+    <form>
+      <input disabled={!connected} />
+      <button disabled={!connected}>Send</button>
+      {!connected && <p>We'll send your message as soon as you're back online.</p>}
+    </form>
+  );
+}`}
+			language="tsx"
+			filename="ChatInput.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Reconnect exhaustion">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			After <InlineCode>reconnectMaxAttempts</InlineCode>, the manager gives up
+			and stays in <InlineCode>"disconnected"</InlineCode>. Detect the
+			transition and offer a manual retry:
+		</p>
+		<CodeBlock
+			code={`onConnectionStateChange(state) {
+  if (state === "disconnected" && manager.getReconnectAttempt() >= MAX) {
+    notify({
+      title: "Connection lost",
+      action: { label: "Retry", onClick: () => manager.connect() },
+    });
+  }
+}`}
+			language="tsx"
+			filename="manager.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Error boundaries">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			react-socket hooks never throw on their own. Errors only come from your
+			handlers inside <InlineCode>useSocketEvent</InlineCode>,
+			<InlineCode>onReady</InlineCode>, and so on. Treat these like any other
+			rendering code: wrap the subtree in an error boundary if you want to
+			isolate failures.
+		</p>
+		<Callout type="warning" title="Do not swallow handler errors">
+			If a <InlineCode>useSocketEvent</InlineCode> handler throws, React's
+			error propagation kicks in. Catch inside the handler when the failure
+			is expected (for example, a parse fallback), and let the boundary
+			handle everything else.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Retry vs surface">
+		<ul class="list-disc list-inside space-y-2 text-white/60">
+			<li>
+				<strong>Transient network drops:</strong> let the manager handle it.
+				Show a subtle "reconnecting" indicator; do not block the UI.
+			</li>
+			<li>
+				<strong>Auth rejection:</strong> refresh the token and
+				<InlineCode>forceReconnect()</InlineCode>. Only surface if the refresh
+				itself fails.
+			</li>
+			<li>
+				<strong>Send while offline:</strong> show failure immediately, or
+				queue and replay if the message is important.
+			</li>
+			<li>
+				<strong>Deserialize failure:</strong> report to your error tracker and
+				keep going. One bad frame should not kill the session.
+			</li>
+			<li>
+				<strong>Reconnect exhausted:</strong> surface, with a manual retry.
+				Silent endless retry is a worse UX than asking the user to refresh.
+			</li>
+		</ul>
+	</ContentSection>
+
+	<ContentSection label="Next steps">
+		<ul class="space-y-2 text-white/60">
+			<li>
+				<a href={href("/docs/reconnection")} class="text-accent hover:underline">Reconnection</a> — backoff, state transitions, manual retry
+			</li>
+			<li>
+				<a href={href("/docs/auth")} class="text-accent hover:underline">Authentication</a> — handling token refresh on 401
+			</li>
+			<li>
+				<a href={href("/docs/undelivered-sync")} class="text-accent hover:underline">Undelivered sync</a> — queue and replay offline sends
+			</li>
+		</ul>
+	</ContentSection>
+</DocsPage>

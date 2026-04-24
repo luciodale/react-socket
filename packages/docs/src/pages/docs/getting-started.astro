@@ -18,86 +18,52 @@ export const prerender = true;
 	<ContentSection label="What is react-socket?">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			WebSockets look easy until you actually build with them. The initial
-			<InlineCode>new WebSocket(url)</InlineCode> takes five minutes. Then you
-			spend the next week wiring up reconnection logic, figuring out why your
-			subscriptions vanish after a dropped connection, deduplicating messages
-			when three components all subscribe to the same channel, and tracking
-			which sends actually made it to the server. All of this ends up scattered
-			across hooks, effects, and refs until the whole thing becomes a maintenance
-			problem.
+			<InlineCode>new WebSocket(url)</InlineCode> takes five minutes. Then
+			you spend the next week wiring up reconnection, figuring out why your
+			subscriptions vanish after a dropped connection, deduplicating
+			messages when three components subscribe to the same channel, and
+			tracking which sends actually reached the server. That logic ends up
+			scattered across hooks, effects, and refs until the whole thing
+			becomes a maintenance problem.
 		</p>
 		<p class="text-white/60 leading-relaxed">
-			react-socket takes that entire layer off your plate. You define your
-			message types, wire up a few callbacks, and the library handles the
-			socket lifecycle, reconnection, keep-alive, subscription management,
-			and in-flight tracking. Your code stays focused on application
-			logic. The socket plumbing just works.
+			react socket takes that layer off your plate. You define your message
+			types, wire up a few extractors, and the library handles socket
+			lifecycle, reconnection, keep alive, subscription management, and in
+			flight tracking. Five React hooks give you everything you need at the
+			call site. No message switch, no imperative glue.
 		</p>
 	</ContentSection>
 
-	<ContentSection label="Rationale">
-		<p class="text-white/60 mb-4 leading-relaxed">
-			Most WebSocket libraries fall into two camps. The heavy ones give
-			you an opinionated protocol, built-in state management, and
-			abstractions you end up fighting against the moment your use case
-			doesn't fit their mold. The thin ones hand you a WebSocket wrapper
-			and leave every hard problem on your plate: reconnection,
-			subscription deduplication, delivery tracking, message routing. You
-			still write all the same boilerplate.
-		</p>
-		<p class="text-white/60 mb-4 leading-relaxed">
-			react-socket sits in the space between. It's an <strong
-				class="text-white/80">orchestrator</strong
-			>, not a framework. It manages the transport concerns that are
-			genuinely painful to get right, and gets out of the way for
-			everything else. Your protocol. Your state management. Your
-			serialization format. The library doesn't make decisions it can't
-			reverse.
-		</p>
-		<p class="text-white/60 mb-4 leading-relaxed">
-			Here's what you get for free:
-		</p>
+	<ContentSection label="Principles">
 		<FeatureList
 			features={[
 				{
-					highlight: "Automatic reconnection",
+					highlight: "One way per concern",
 					description:
-						"exponential backoff with jitter. Subscriptions are restored transparently after every reconnect",
+						"Each hook has exactly one job. Send, subscribe, react to an event, observe connection state, observe pending subscription — five hooks, zero overlap",
 					color: "accent",
 				},
 				{
-					highlight: "Subscription deduplication",
+					highlight: "Typed end to end",
 					description:
-						"ten components can subscribe to the same channel and only one message goes to the server. The library ref-counts internally. When the last component unmounts, the unsubscribe fires automatically",
+						"Discriminated unions on a configurable key drive inference through useSocketEvent. No predicate type guards, no explicit generics for the common case",
 					color: "blue",
 				},
 				{
-					highlight: "In-flight message tracking",
+					highlight: "Lifecycle in the library",
 					description:
-						"send a message with an ack ID, track it as pending, and know exactly when the server confirmed it or when it was dropped",
+						"Ack matching and subscription resolution are declared once as extractors. Your components never call ackInFlight or resolvePendingSubscription",
 					color: "green",
 				},
 				{
-					highlight: "Keep-alive pings",
+					highlight: "Your protocol, your store",
 					description:
-						"proxies and load balancers won't kill idle connections",
+						"react socket does not render, does not touch your state manager, does not assume a wire format. It keeps the socket organized and gets out of the way",
 					color: "purple",
-				},
-				{
-					highlight: "First-class TypeScript",
-					description:
-						"your client and server message types flow through every callback, every send(), every received message. Protocol mismatches are caught at compile time, not in production",
-					color: "yellow",
 				},
 			]}
 		/>
-		<p class="text-white/60 leading-relaxed">
-			And here's what you stay in control of: your message format, your
-			state management, your routing logic, your UI. react-socket doesn't
-			render anything, doesn't touch your store, and doesn't assume your
-			protocol. It keeps the socket lifecycle organized and predictable.
-			You write the business logic.
-		</p>
 	</ContentSection>
 
 	<ContentSection label="Installation">
@@ -112,268 +78,202 @@ export const prerender = true;
 		/>
 	</ContentSection>
 
-	<ContentSection label="Quick Start">
+	<ContentSection label="Quick start">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			The simplest way to use react-socket. Create a manager in a
-			<InlineCode>useMemo</InlineCode>, store the response in
-			<InlineCode>useState</InlineCode>, fire a message, done. Everything
-			lives in a single component:
+			Module level manager, one hook to react to incoming events, one hook
+			to send. That is the entire setup for a fire and forget echo.
 		</p>
 		<CodeBlock
-			code={`import { useMemo, useState } from "react";
-import { WebSocketManager } from "@luciodale/react-socket";
+			code={`import { useEffect, useState } from "react";
+import {
+  WebSocketManager,
+  useSocketEvent,
+  useSocketSend,
+} from "@luciodale/react-socket";
 
-type TClientMsg = { action: "echo"; text: string };
-type TServerMsg = { action: "echo"; text: string };
+type TClientMsg = { type: "echo"; text: string };
+type TServerMsg = { type: "echo"; text: string };
 
-function EchoDemo() {
+const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  url: "ws://localhost:3001/ws",
+  serialize: (msg) => JSON.stringify(msg),
+  deserialize: (raw) => JSON.parse(raw),
+});
+
+export function Echo() {
   const [response, setResponse] = useState<string | null>(null);
+  const { send } = useSocketSend(manager);
 
-  const manager = useMemo(() => {
-    const m = new WebSocketManager<TClientMsg, TServerMsg>({
-      url: "ws://localhost:3001/ws",
-      serialize: (msg) => JSON.stringify(msg),
-      deserialize: (raw) => JSON.parse(raw),
+  useSocketEvent(manager, "echo", (msg) => setResponse(msg.text));
 
-      onMessageReceived(msg) {
-        setResponse(msg.text);
-      },
-    });
-    m.connect();
-    return m;
+  useEffect(() => {
+    manager.connect();
+    return () => manager.disconnect();
   }, []);
 
   return (
-    <div>
-      <button onClick={() => manager.send({ data: { action: "echo", text: "hello" } })}>
+    <>
+      <button onClick={() => send({ type: "echo", text: "hello" })}>
         Send
       </button>
       {response && <p>Server said: {response}</p>}
-    </div>
+    </>
   );
 }`}
 			language="tsx"
-			filename="EchoDemo.tsx"
+			filename="Echo.tsx"
 		/>
-		<p class="text-white/60 mt-4 leading-relaxed">
-			That's the whole thing. The manager handles the connection,
-			serialization, and message routing. You define what to send and what
-			to do when something comes back. Notice how
-			<InlineCode>TClientMsg</InlineCode> and
-			<InlineCode>TServerMsg</InlineCode> are fully typed: if you change a field
-			name or add a new message variant, TypeScript tells you everywhere that
-			needs updating.
-		</p>
-		<Callout type="tip" title="Lifecycle">
-			In a real app, call <InlineCode>manager.connect()</InlineCode> inside
-			a <InlineCode>useEffect</InlineCode>
-			and return <InlineCode>manager.disconnect()</InlineCode> as cleanup. The
-			quick start above inlines it in <InlineCode>useMemo</InlineCode> for brevity.
+		<Callout type="tip" title="Why module level?">
+			The manager holds long lived socket state. Re constructing it on every
+			render defeats reconnection bookkeeping. Module level is simplest;
+			context or a singleton factory is fine too. The only thing to avoid
+			is <InlineCode>new WebSocketManager(...)</InlineCode> inside a
+			component body.
 		</Callout>
 	</ContentSection>
 
-	<ContentSection label="Subscriptions: One Message, Many Readers">
-		<p class="text-white/60 mb-4 leading-relaxed">
-			Subscriptions are the core pattern for real-time data. You send a
-			message to the server saying "I want updates on this topic," and the
-			server pushes data back over time. The powerful part: if five
-			components subscribe to the same channel, only one message goes to
-			the server. The library ref-counts internally and all components
-			read from the same store, updated by a single <InlineCode
-				>onMessageReceived</InlineCode
-			> callback.
-		</p>
+	<ContentSection label="The ten hooks">
 		<CodeBlock
-			code={`import { useEffect } from "react";
+			code={`// React to an incoming message of a given type
+useSocketEvent(manager, "notification", (msg) => { ... });
 
-function PriceTracker({ ticker }: { ticker: string }) {
-  useEffect(() => {
-    manager.subscribe(
-      \`prices:\${ticker}\`,
-      { action: "subscribe", channel: ticker }
-    );
-    return () => {
-      manager.unsubscribe(
-        \`prices:\${ticker}\`,
-        { action: "unsubscribe", channel: ticker }
-      );
-    };
-  }, [ticker]);
+// Like useSocketEvent but batches matching events and flushes every flushMs
+useSocketEventBatch(manager, "tick", (msgs) => { ... }, { flushMs: 100 });
 
-  const price = useStore((s) => s.prices[ticker]);
-  return <span>{price}</span>;
-}
-
-// Render this 10 times with the same ticker.
-// One subscribe message hits the server. All 10 components stay in sync.`}
-			language="tsx"
-			filename="PriceTracker.tsx"
-		/>
-		<p class="text-white/60 mt-4 leading-relaxed">
-			No duplicate messages, no leaked subscriptions, no manual
-			bookkeeping. When the connection drops and comes back, the library
-			automatically re-subscribes to every active channel using the stored
-			payload. Your components don't even notice.
-		</p>
-	</ContentSection>
-
-	<ContentSection label="Fire and Forget vs. Acknowledged Sends">
-		<p class="text-white/60 mb-4 leading-relaxed">
-			react-socket supports two sending patterns, and you pick per
-			message:
-		</p>
-		<p class="text-white/60 mb-4 leading-relaxed">
-			<strong class="text-white/80">Fire and forget</strong> is the simple case.
-			You send a message and move on. No tracking, no confirmation. Great for
-			cursor positions, typing indicators, or anything where a lost message
-			doesn't matter because the next one is already on the way.
-		</p>
-		<CodeBlock
-			code={`// Fire and forget: send and move on
-manager.send({ data: { action: "cursor_move", x: 100, y: 200 } });`}
-			language="tsx"
-			filename="fire-and-forget.ts"
-		/>
-		<p class="text-white/60 mb-4 mt-4 leading-relaxed">
-			<strong class="text-white/80">Acknowledged sends</strong> are for when
-			delivery matters. You include an <InlineCode>ackId</InlineCode> and the
-			library tracks the message as "in-flight" until the server echoes it back.
-			The key: the server must include the same ID in its response so the library
-			can match the confirmation to the original send.
-		</p>
-		<CodeBlock
-			code={`// Acknowledged send: track until the server confirms
-const id = crypto.randomUUID();
-
-manager.send({
-  data: { action: "message", id, channel: "general", text: "hello" },
-  ackId: id,
+// Subscribe to a server-side stream (ref counted, auto cleanup)
+useSocketSubscription(manager, {
+  key: roomId,
+  subscribe: { type: "subscribe", channel: roomId },
+  unsubscribe: { type: "unsubscribe", channel: roomId },
 });
 
-// Later, when the server echoes the message back:
-onMessageReceived(msg) {
-  if (msg.action === "message") {
-    manager.ackInFlight(msg.id); // removes from in-flight tracking
-  }
-}`}
+// "joining..." UI while a subscribe is pending
+const joining = useSocketPendingSubscription(manager, roomId);
+
+// Typed send fn
+const { send } = useSocketSend(manager);
+
+// Fires on every send(), even offline — optimistic UI
+useSocketSendIntent(manager, ({ data, ackId }) => { ... });
+
+// Fires when in-flight messages are dropped on disconnect
+useSocketInFlightDrop(manager, (messages) => { ... });
+
+// Fires after (re)connect once subs are restored
+useSocketReady(manager, (restoredKeys) => { ... });
+
+// Fires when the last subscriber for a key unsubscribes
+useSocketLastUnsubscribe(manager, (key, data) => { ... });
+
+// Observable connection state
+const state = useSocketConnectionState(manager);`}
 			language="tsx"
-			filename="acknowledged-send.ts"
+			filename="hooks.ts"
 		/>
 		<p class="text-white/60 mt-4 leading-relaxed">
-			The <InlineCode>onSendIntent</InlineCode> callback fires on every
-			<InlineCode>send()</InlineCode>, even when offline. This is where
-			you do optimistic UI updates: add the message to your store
-			immediately, then confirm or roll back when the server responds. If
-			the connection drops while messages are in-flight,
-			<InlineCode>onInFlightDrop</InlineCode> fires so you can mark them as
-			failed or save them for retry.
+			See <a href={href("/docs/patterns")} class="text-accent hover:underline">Patterns</a> for
+			scenario driven examples — fire and forget, stream with history,
+			<a href={href("/docs/patterns#llm-streaming-split-streaming-from-history")} class="text-accent hover:underline">LLM token streaming</a>,
+			acknowledged sends with optimistic UI, refetch after reconnect,
+			store eviction, and more.
 		</p>
 	</ContentSection>
 
-	<ContentSection label="Callbacks as Dispatchers">
+	<ContentSection label="Two layers: callback config and hook wrappers">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			The idea is simple: you use the manager's callbacks as dispatchers
-			and organize your logic in blocks based on the message types you
-			receive. Instead of scattering WebSocket handling across components,
-			everything routes through one place. Like a reducer, but for your
-			socket:
+			Every lifecycle moment (a send goes out, an in flight batch drops,
+			the socket becomes ready, a ref count hits zero, connection state
+			changes) can be observed two ways. They are additive, so both fire
+			for the same event if both are wired.
+		</p>
+		<ul class="list-disc list-inside space-y-2 text-white/60 mb-4">
+			<li>
+				<strong class="text-white/80">Config callbacks</strong> on
+				<InlineCode>new WebSocketManager({"{ onSendIntent, onInFlightDrop, onReady, onLastUnsubscribe, onConnectionStateChange }"})</InlineCode> — declared once at the construction site, fire before any listeners. Good for transport level plumbing and non React consumers.
+			</li>
+			<li>
+				<strong class="text-white/80">Hook wrappers</strong>
+				(<InlineCode>useSocketSendIntent</InlineCode>,
+				<InlineCode>useSocketInFlightDrop</InlineCode>,
+				<InlineCode>useSocketReady</InlineCode>,
+				<InlineCode>useSocketLastUnsubscribe</InlineCode>,
+				<InlineCode>useSocketConnectionState</InlineCode>) — mount on any component, auto cleanup on unmount, latest handler without resubscribing. Good for feature scoped bridges and UI that reacts to socket events.
+			</li>
+		</ul>
+		<Callout type="tip" title="React app? Reach for the hooks first">
+			In a React codebase, prefer the hooks. Colocating optimistic UI,
+			failure handling, and refetch logic next to the components that own
+			the domain makes the intent obvious and keeps the manager
+			construction site free of app state coupling. Fall back to the
+			config callback when you are outside React (workers, node scripts,
+			tests) or when the handler needs to fire during manager bootstrap
+			before any component has mounted.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Testing">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			A drop-in <InlineCode>MockTransport</InlineCode> ships from a dedicated
+			subpath. Pass it as the manager's <InlineCode>transport</InlineCode> in
+			tests and drive the lifecycle synchronously: no real WebSocket server,
+			no global stubs.
 		</p>
 		<CodeBlock
-			code={`const manager = new WebSocketManager<TClientMsg, TServerMsg>({
-  url: "wss://api.example.com/ws",
-  serialize: (msg) => JSON.stringify(msg),
-  deserialize: (raw) => JSON.parse(raw),
+			code={`import { MockTransport } from "@luciodale/react-socket/testing";
 
-  onMessageReceived(msg) {
-    switch (msg.action) {
-      case "echo":
-        handleEcho(msg);
-        break;
-      case "subscribe_ack":
-        manager.resolvePendingSubscription(\`chat:\${msg.channel}\`);
-        break;
-      case "message":
-        manager.ackInFlight(msg.id);
-        handleChatMessage(msg);
-        break;
-    }
-  },
+const transport = new MockTransport();
+const manager = new WebSocketManager({ url: "ws://test", transport, ... });
 
-  onSendIntent({ data, ackId }) {
-    if (data.action === "message" && ackId) {
-      addOptimisticMessage(data, ackId);
-    }
-  },
-});`}
+manager.connect();
+transport.simulateOpen();
+transport.simulateMessage(JSON.stringify({ type: "hi" }));
+expect(transport.sentMessages).toHaveLength(1);`}
 			language="tsx"
-			filename="manager.ts"
+			filename="example.test.ts"
 		/>
 		<p class="text-white/60 mt-4 leading-relaxed">
-			The library isn't trying to be magic. It's an orchestrator that
-			keeps things organized and functional. You write the logic, the
-			manager makes sure it fires at the right time with the right data,
-			fully typed.
+			Full recipes (reconnect, ack flow, hook tests with React Testing
+			Library, Vitest setup) live on the
+			<a href={href("/docs/testing")} class="text-accent hover:underline"> Testing</a> page.
 		</p>
 	</ContentSection>
 
-	<ContentSection label="TypeScript All the Way Down">
-		<p class="text-white/60 mb-4 leading-relaxed">
-			This is not TypeScript as an afterthought. Your
-			<InlineCode>TClientMsg</InlineCode> and
-			<InlineCode>TServerMsg</InlineCode> types are the single source of truth
-			for your entire WebSocket protocol. They flow through the constructor,
-			every callback, <InlineCode>send()</InlineCode>,
-			<InlineCode>serialize</InlineCode>,
-			<InlineCode>deserialize</InlineCode>, and subscription payloads.
-		</p>
-		<CodeBlock
-			code={`// These union types define your protocol.
-// Change a field here and TypeScript flags every callsite.
-
-type TClientMsg =
-  | { action: "echo"; text: string }
-  | { action: "subscribe"; channel: string }
-  | { action: "message"; id: string; channel: string; text: string };
-
-type TServerMsg =
-  | { action: "echo"; text: string }
-  | { action: "subscribe_ack"; channel: string }
-  | { action: "message"; id: string; channel: string; sender: string; text: string };`}
-			language="tsx"
-			filename="types.ts"
-		/>
-		<p class="text-white/60 mt-4 leading-relaxed">
-			As your protocol grows, these types keep everything in sync across
-			the entire codebase. Add a new message variant, rename a field,
-			change a payload shape: the compiler tells you what broke before you
-			ever run the code.
+	<ContentSection label="Binary frames and high-frequency streams">
+		<p class="text-white/60 leading-relaxed">
+			The wire type is a generic on the manager. Default is
+			<InlineCode>string</InlineCode>; widen it to
+			<InlineCode>ArrayBuffer</InlineCode>, <InlineCode>Blob</InlineCode>, or
+			any union and pair with <InlineCode>binaryType</InlineCode> to send
+			MessagePack, protobuf, or raw bytes. For high-frequency streams that
+			would otherwise melt the renderer,
+			<InlineCode>useSocketEventBatch</InlineCode> buffers matching events
+			and flushes once per
+			<InlineCode>flushMs</InlineCode> instead of per event. See
+			<a href={href("/docs/binary")} class="text-accent hover:underline"> Binary frames</a>
+			and
+			<a href={href("/docs/backpressure")} class="text-accent hover:underline"> Backpressure</a>.
 		</p>
 	</ContentSection>
 
-	<ContentSection label="Next Steps">
+	<ContentSection label="Next">
 		<ul class="space-y-2 text-white/60">
 			<li>
-				<a
-					href={href("/docs/configuration")}
-					class="text-accent hover:underline">Configuration</a
-				> — all manager options in detail
+				<a href={href("/docs/patterns")} class="text-accent hover:underline">Patterns</a> — concrete scenarios
 			</li>
 			<li>
-				<a
-					href={href("/docs/subscriptions")}
-					class="text-accent hover:underline">Subscriptions</a
-				> — channels with automatic deduplication
+				<a href={href("/docs/api")} class="text-accent hover:underline">API Reference</a> — every hook and manager method
 			</li>
 			<li>
-				<a
-					href={href("/docs/optimistic-updates")}
-					class="text-accent hover:underline">Sending Messages</a
-				> — fire-and-forget and acknowledged sends
+				<a href={href("/docs/configuration")} class="text-accent hover:underline">Configuration</a> — extractors, discriminator, transport
 			</li>
 			<li>
-				<a href={href("/docs/api")} class="text-accent hover:underline"
-					>API Reference</a
-				> — every method and type
+				<a href={href("/docs/testing")} class="text-accent hover:underline">Testing</a> — MockTransport, simulating lifecycle, hook tests
+			</li>
+			<li>
+				<a href={href("/docs/binary")} class="text-accent hover:underline">Binary frames</a> — ArrayBuffer / Blob, MessagePack, mixed string + binary
+			</li>
+			<li>
+				<a href={href("/docs/backpressure")} class="text-accent hover:underline">Backpressure</a> — useSocketEventBatch, picking flushMs
 			</li>
 		</ul>
 	</ContentSection>
