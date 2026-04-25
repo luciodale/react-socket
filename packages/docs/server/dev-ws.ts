@@ -11,7 +11,9 @@ type TClientMsg =
 	| { type: "auth"; token: string }
 	| { type: "simulate-session-expiry" }
 	| { type: "subscribe-notifications" }
-	| { type: "unsubscribe-notifications" };
+	| { type: "unsubscribe-notifications" }
+	| { type: "subscribe-ticks" }
+	| { type: "unsubscribe-ticks" };
 
 type TServerMsg =
 	| { type: "pong" }
@@ -34,7 +36,8 @@ type TServerMsg =
 	| { type: "auth-required" }
 	| { type: "auth-expired" }
 	| { type: "auth-ok"; userId: string }
-	| { type: "notification"; id: string; title: string; body: string };
+	| { type: "notification"; id: string; title: string; body: string }
+	| { type: "tick"; n: number; ts: number };
 
 // ── Message handler ─────────────────────────────────────────────────
 
@@ -150,6 +153,19 @@ const NOTIFICATION_TITLES = [
 	"Deploy succeeded",
 ];
 
+function startTicks(send: (msg: TServerMsg) => void): TNotifHandle {
+	let n = 0;
+	// 50 ticks/second, fast enough to make per-event vs batched
+	// rendering cost visibly different.
+	const interval = setInterval(() => {
+		send({ type: "tick", n, ts: Date.now() });
+		n += 1;
+	}, 20);
+	return {
+		stop: () => clearInterval(interval),
+	};
+}
+
 function startNotifications(send: (msg: TServerMsg) => void): TNotifHandle {
 	let i = 0;
 	const interval = setInterval(() => {
@@ -175,6 +191,7 @@ const PORT = 3001;
 type TWsData = {
 	token: string | null;
 	notifs: TNotifHandle | null;
+	ticks: TNotifHandle | null;
 };
 
 Bun.serve<TWsData>({
@@ -184,7 +201,7 @@ Bun.serve<TWsData>({
 		if (url.pathname === "/ws") {
 			const token = url.searchParams.get("token");
 			const upgraded = server.upgrade(req, {
-				data: { token, notifs: null },
+				data: { token, notifs: null, ticks: null },
 			});
 			if (!upgraded) {
 				return new Response("WebSocket upgrade failed", { status: 400 });
@@ -228,12 +245,24 @@ Bun.serve<TWsData>({
 				ws.data.notifs = null;
 				return;
 			}
+			if (msg.type === "subscribe-ticks") {
+				ws.data.ticks?.stop();
+				ws.data.ticks = startTicks(send);
+				return;
+			}
+			if (msg.type === "unsubscribe-ticks") {
+				ws.data.ticks?.stop();
+				ws.data.ticks = null;
+				return;
+			}
 
 			handleMessage({ send: (data: string) => ws.send(data) }, msg);
 		},
 		close(ws) {
 			ws.data.notifs?.stop();
 			ws.data.notifs = null;
+			ws.data.ticks?.stop();
+			ws.data.ticks = null;
 		},
 	},
 });

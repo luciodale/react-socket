@@ -1,0 +1,405 @@
+---
+import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
+import DocsPage from "../../layouts/DocsPage.astro";
+import { href } from "../../lib/link";
+
+export const prerender = true;
+
+const debugEventsSample = `// Every internal lifecycle moment fires a typed debug event:
+//
+// connection-state-change      from / to states
+// message-received             raw + deserialized + isPong
+// message-sent                 ackId + raw + deserialized
+// subscribe / unsubscribe      key + refCount
+// in-flight-ack                ackId
+// in-flight-drop               ids
+// pending-subscription-resolved key
+// reconnect-scheduled          attempt + delayMs
+// ready                        restoredKeys
+// deserialize-error            raw + error
+// url-resolve-error            error
+// dispose                      ()`;
+
+const sentrySample = `import * as Sentry from "@sentry/browser";
+
+const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  url: getWsUrl(),
+  serialize: (m) => JSON.stringify(m),
+  deserialize: (r) => JSON.parse(r),
+
+  onDebug(event) {
+    switch (event.type) {
+      case "connection-state-change":
+        Sentry.addBreadcrumb({
+          category: "websocket",
+          message: \`\${event.from} → \${event.to}\`,
+          level: event.to === "reconnecting" ? "warning" : "info",
+        });
+        break;
+
+      case "reconnect-scheduled":
+        Sentry.addBreadcrumb({
+          category: "websocket",
+          message: \`reconnect attempt \${event.attempt} in \${Math.round(event.delayMs)}ms\`,
+          level: "warning",
+        });
+        break;
+
+      case "in-flight-drop":
+        Sentry.captureMessage("websocket dropped in-flight messages", {
+          level: "error",
+          extra: { count: event.ids.length, ids: event.ids },
+        });
+        break;
+
+      case "deserialize-error":
+        Sentry.captureException(event.error, {
+          level: "error",
+          extra: {
+            raw: typeof event.raw === "string"
+              ? event.raw.slice(0, 500)
+              : "[binary]",
+          },
+        });
+        break;
+
+      case "url-resolve-error":
+        Sentry.captureException(event.error, {
+          level: "error",
+          tags: { source: "ws-url-resolver" },
+        });
+        break;
+    }
+  },
+});`;
+
+const datadogSample = `import { datadogLogs } from "@datadog/browser-logs";
+
+const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  url: getWsUrl(),
+  serialize: (m) => JSON.stringify(m),
+  deserialize: (r) => JSON.parse(r),
+
+  onDebug(event) {
+    if (event.type === "connection-state-change") {
+      datadogLogs.logger.info("ws.state", {
+        from: event.from,
+        to: event.to,
+      });
+    }
+    if (event.type === "in-flight-drop") {
+      datadogLogs.logger.error("ws.in_flight_drop", {
+        count: event.ids.length,
+      });
+    }
+    if (event.type === "deserialize-error") {
+      datadogLogs.logger.error("ws.deserialize_error", {
+        raw: typeof event.raw === "string"
+          ? event.raw.slice(0, 200)
+          : "[binary]",
+      });
+    }
+  },
+});`;
+
+const sampleSample = `// High-traffic apps emit thousands of debug events per minute.
+// Sample message-received / message-sent so you don't melt your log
+// pipeline; keep error-class events at 100%.
+
+let messageSampleCounter = 0;
+function shouldSampleMessage() {
+  messageSampleCounter += 1;
+  return messageSampleCounter % 100 === 0;
+}
+
+manager.addDebugListener((event) => {
+  switch (event.type) {
+    case "message-received":
+    case "message-sent":
+      if (!shouldSampleMessage()) return;
+      datadogLogs.logger.info(\`ws.\${event.type}\`, summarize(event));
+      break;
+    case "deserialize-error":
+    case "url-resolve-error":
+    case "in-flight-drop":
+      // Always send error-class events.
+      datadogLogs.logger.error(\`ws.\${event.type}\`, summarize(event));
+      break;
+  }
+});`;
+
+const redactSample = `// Strip sensitive fields before logging. Server responses can contain
+// tokens, PII, or other things you do not want in your error tracker.
+function safeRaw(raw: string | ArrayBuffer | Blob): string {
+  if (typeof raw !== "string") return "[binary " + (raw as ArrayBuffer).byteLength + "B]";
+  try {
+    const parsed = JSON.parse(raw);
+    redact(parsed, ["token", "password", "secret", "ssn"]);
+    return JSON.stringify(parsed).slice(0, 500);
+  } catch {
+    return raw.slice(0, 500);
+  }
+}`;
+
+const customMetricsSample = `let lastConnectAt = Date.now();
+let connectCount = 0;
+let dropCount = 0;
+
+manager.addDebugListener((event) => {
+  if (event.type === "connection-state-change" && event.to === "connected") {
+    connectCount += 1;
+    metrics.gauge("ws.connect_count", connectCount);
+  }
+  if (event.type === "reconnect-scheduled") {
+    metrics.gauge("ws.reconnect_attempt", event.attempt);
+  }
+  if (event.type === "in-flight-drop") {
+    dropCount += event.ids.length;
+    metrics.gauge("ws.drop_count", dropCount);
+  }
+});`;
+
+const sentryReporterSample = `import * as Sentry from "@sentry/browser";
+import type {
+  TDebugEvent,
+  WebSocketManager,
+} from "@luciodale/react-socket";
+
+type TSentryReporterOptions = {
+  // 1 in N for message-received / message-sent. Default: 100.
+  messageSampleRate?: number;
+  // Truncate raw payloads to this many characters before logging.
+  // Default: 200. Pass 0 to skip raw entirely.
+  rawTruncate?: number;
+  // Treat the connection as healthy after this many ms reconnecting
+  // before emitting a Sentry message. Default: 30000.
+  reconnectAlertAfterMs?: number;
+};
+
+/**
+ * Wires a WebSocketManager's debug stream into Sentry. Returns an
+ * unsubscribe. Connection state and reconnects become breadcrumbs;
+ * deserialize / url-resolve errors and persistent reconnect storms
+ * become captured exceptions.
+ */
+export function createSentryReporter<TClientMsg, TServerMsg>(
+  manager: WebSocketManager<TClientMsg, TServerMsg>,
+  options: TSentryReporterOptions = {},
+): () => void {
+  const sample = options.messageSampleRate ?? 100;
+  const truncate = options.rawTruncate ?? 200;
+  const reconnectAlertAfterMs = options.reconnectAlertAfterMs ?? 30_000;
+
+  let messageCounter = 0;
+  let reconnectingSince: number | null = null;
+
+  function safeRaw(raw: unknown): string {
+    if (truncate <= 0) return "[redacted]";
+    if (typeof raw !== "string") return \`[binary]\`;
+    return raw.length > truncate ? raw.slice(0, truncate) + "…" : raw;
+  }
+
+  return manager.addDebugListener((event: TDebugEvent<TClientMsg, TServerMsg>) => {
+    switch (event.type) {
+      case "connection-state-change": {
+        Sentry.addBreadcrumb({
+          category: "websocket",
+          message: \`\${event.from} → \${event.to}\`,
+          level: event.to === "reconnecting" ? "warning" : "info",
+        });
+        if (event.to === "reconnecting" && reconnectingSince === null) {
+          reconnectingSince = Date.now();
+        }
+        if (event.to === "connected") {
+          reconnectingSince = null;
+        }
+        break;
+      }
+
+      case "reconnect-scheduled": {
+        Sentry.addBreadcrumb({
+          category: "websocket",
+          message: \`reconnect attempt \${event.attempt} in \${Math.round(event.delayMs)}ms\`,
+          level: "warning",
+        });
+        if (
+          reconnectingSince !== null &&
+          Date.now() - reconnectingSince > reconnectAlertAfterMs
+        ) {
+          Sentry.captureMessage("websocket reconnecting for too long", {
+            level: "error",
+            extra: {
+              attempt: event.attempt,
+              elapsedMs: Date.now() - reconnectingSince,
+            },
+          });
+          // Reset so we do not repeat the alert every backoff tick.
+          reconnectingSince = Date.now();
+        }
+        break;
+      }
+
+      case "message-received":
+      case "message-sent": {
+        messageCounter += 1;
+        if (messageCounter % sample !== 0) break;
+        Sentry.addBreadcrumb({
+          category: "websocket",
+          message: event.type,
+          level: "info",
+          data: { raw: safeRaw(event.raw) },
+        });
+        break;
+      }
+
+      case "in-flight-drop": {
+        Sentry.captureMessage("websocket dropped in-flight messages", {
+          level: "error",
+          extra: { count: event.ids.length, ids: event.ids },
+        });
+        break;
+      }
+
+      case "deserialize-error": {
+        Sentry.captureException(event.error, {
+          level: "error",
+          tags: { source: "ws-deserialize" },
+          extra: { raw: safeRaw(event.raw) },
+        });
+        break;
+      }
+
+      case "url-resolve-error": {
+        Sentry.captureException(event.error, {
+          level: "error",
+          tags: { source: "ws-url-resolver" },
+        });
+        break;
+      }
+    }
+  });
+}
+
+// Usage:
+//
+// const stop = createSentryReporter(manager, {
+//   messageSampleRate: 200,
+//   rawTruncate: 300,
+// });
+// // call stop() to detach (rarely needed since manager outlives the reporter)`;
+---
+
+<DocsPage
+	title="Monitoring and production debug"
+	description="Ship react-socket lifecycle events to Sentry, Datadog, or any monitoring backend with onDebug or addDebugListener."
+>
+	<ContentSection label="Monitoring and production debug">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			The Inspector ships dev-only insight. Production needs to flow into
+			whatever monitoring backend you already run. Every internal lifecycle
+			moment fires a typed event that you can route to Sentry, Datadog, your
+			own logger, or all three.
+		</p>
+		<p class="text-white/60 leading-relaxed">
+			Two ways to consume the events: <InlineCode>onDebug</InlineCode> on
+			the manager config (fires before any listeners, no React needed) and
+			<InlineCode>manager.addDebugListener(cb)</InlineCode> at runtime
+			(returns an unsubscribe). Wire one or both depending on whether your
+			reporting code lives at construction or inside a component.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Available debug events">
+		<CodeBlock code={debugEventsSample} language="ts" filename="debug-events.ts" />
+		<p class="text-white/60 mt-4 leading-relaxed">
+			See <a href={href("/docs/api")} class="text-accent hover:underline">API reference</a> for
+			full payload types.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Sentry breadcrumbs and error capture">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Most state changes are breadcrumbs (context for whatever exception
+			fires later); only true error-class events get captured outright.
+		</p>
+		<CodeBlock code={sentrySample} language="tsx" filename="manager.ts" />
+		<Callout type="tip" title="Breadcrumb cap">
+			Sentry caps breadcrumbs at 100 by default. A reconnect storm can blow
+			through that. Sample <InlineCode>connection-state-change</InlineCode>
+			and <InlineCode>reconnect-scheduled</InlineCode> if you have a flaky
+			connection.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Datadog browser logs">
+		<CodeBlock code={datadogSample} language="tsx" filename="manager.ts" />
+	</ContentSection>
+
+	<ContentSection label="Sampling">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			<InlineCode>message-received</InlineCode> and
+			<InlineCode>message-sent</InlineCode> fire on every frame. For a
+			price feed at 200 ticks/second that is 12k events/minute per tab.
+			Sample those; never sample errors:
+		</p>
+		<CodeBlock code={sampleSample} language="tsx" filename="manager.ts" />
+	</ContentSection>
+
+	<ContentSection label="Redacting payloads">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Server responses leak through <InlineCode>raw</InlineCode> and
+			<InlineCode>deserialized</InlineCode> on the debug events. Strip
+			anything sensitive before shipping it off-box.
+		</p>
+		<CodeBlock code={redactSample} language="ts" filename="redact.ts" />
+		<Callout type="warning" title="Default to NOT logging full payloads">
+			Truncate, summarize, or skip. A debug pipeline that mirrors your
+			entire socket traffic is an exfiltration risk and an expensive
+			invoice.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Custom metrics">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			You can also feed a metrics client. Connect counts, reconnect
+			frequency, drop rates — all useful health signals for an app that
+			depends on a live socket.
+		</p>
+		<CodeBlock code={customMetricsSample} language="tsx" filename="metrics.ts" />
+	</ContentSection>
+
+	<ContentSection label="Drop-in createSentryReporter">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Copy the recipe below into your codebase. It bundles the patterns
+			above (breadcrumbs, sampling, redaction, reconnect-storm alert) into
+			a single function. Call it once when the manager is created; call
+			the returned unsubscribe if you ever need to detach.
+		</p>
+		<CodeBlock code={sentryReporterSample} language="ts" filename="createSentryReporter.ts" />
+	</ContentSection>
+
+	<ContentSection label="When to add a debug listener instead of onDebug">
+		<ul class="list-disc list-inside space-y-2 text-white/60">
+			<li><InlineCode>onDebug</InlineCode>: declared once at construction. Best for transport-level reporting that should always run.</li>
+			<li><InlineCode>addDebugListener</InlineCode>: returns an unsubscribe. Best inside a component or feature flag where you want to start and stop dynamically.</li>
+			<li>Both fire for every event. They are additive, not exclusive.</li>
+		</ul>
+	</ContentSection>
+
+	<ContentSection label="Next steps">
+		<ul class="space-y-2 text-white/60">
+			<li>
+				<a href={href("/docs/error-handling")} class="text-accent hover:underline">Error handling</a> — gating reads and writes on connection state
+			</li>
+			<li>
+				<a href={href("/docs/api")} class="text-accent hover:underline">API reference</a> — full debug event payload types
+			</li>
+			<li>
+				<a href={href("/demo/inspector")} class="text-accent hover:underline">Inspector demo</a> — the dev-time view of the same events
+			</li>
+		</ul>
+	</ContentSection>
+</DocsPage>

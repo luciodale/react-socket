@@ -35,7 +35,7 @@ function mintBadToken(): string {
 
 type TLogEntry = { id: string; text: string };
 
-export function AuthRefresh() {
+export function FirstMessageAuth() {
 	const tokenRef = useRef<string>("");
 	const logIdRef = useRef<number>(0);
 	const [currentToken, setCurrentToken] = useState<string>("");

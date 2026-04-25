@@ -7,7 +7,21 @@
 	},
 	"files": {
 		"ignoreUnknown": false,
-		"includes": ["**", "!**/.astro", "!**/*.astro"]
+		"includes": [
+			"**",
+			"!**/.astro",
+			"!**/*.astro",
+			"!**/dist",
+			"!**/.tsbuildinfo",
+			"!**/*.tsbuildinfo",
+			"!*.d.mts",
+			"!*.d.ts",
+			"!vite.lib.config.mjs",
+			"!vitest.config.mjs",
+			"!packages/docs/public/_pagefind",
+			"!packages/docs/wrangler.jsonc",
+			"!.claude/settings.local.json"
+		]
 	},
 	"formatter": {
 		"enabled": true,

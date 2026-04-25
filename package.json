@@ -23,12 +23,12 @@
 	"license": "MIT",
 	"private": true,
 	"scripts": {
-		"dev": "bun run --filter react-socket-docs dev",
+		"dev": "bun run check:single-react && bun run build:lib && bun run --filter react-socket-docs dev",
 		"dev:server": "bun run --filter react-socket-docs dev:server",
 		"build": "bun run build:lib && bun run build:docs",
 		"build:lib": "tsc && vite build -c vite.lib.config.mts",
-		"build:docs": "bun run --filter react-socket-docs build && cp packages/docs/public/.assetsignore packages/docs/dist/.assetsignore",
-		"deploy:docs": "cd packages/docs && npx wrangler deploy",
+		"build:docs": "bun run --filter react-socket-docs build && cp packages/docs/public/.assetsignore packages/docs/dist/client/.assetsignore",
+		"deploy:docs": "bun run --filter react-socket-docs deploy",
 		"npm": "bun run build:lib && cd packages/library && npm publish --access public",
 		"npm:test": "bun run build:lib && cd packages/library && npm pack --dry-run",
 		"format": "biome format --write .",
@@ -36,7 +36,8 @@
 		"lint:fix": "biome check --write .",
 		"unit-tests": "vitest",
 		"unit-tests:ci": "vitest run",
-		"test": "bun run unit-tests:ci"
+		"check:single-react": "bash scripts/check-single-react.sh",
+		"test": "bun run unit-tests:ci && bun run check:single-react"
 	},
 	"workspaces": [
 		"packages/*"

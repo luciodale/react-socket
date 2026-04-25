@@ -40,6 +40,7 @@ export const siteConfig: SiteConfig = {
 				{ href: "/docs/testing", label: "Testing" },
 				{ href: "/docs/binary", label: "Binary frames" },
 				{ href: "/docs/backpressure", label: "Backpressure" },
+				{ href: "/docs/monitoring", label: "Monitoring" },
 				{ href: "/docs/undelivered-sync", label: "Undelivered Sync" },
 			],
 		},
@@ -53,6 +54,7 @@ export const siteConfig: SiteConfig = {
 				{ href: "/demo/undelivered-sync", label: "Undelivered Sync" },
 				{ href: "/demo/auth-refresh", label: "First-message auth" },
 				{ href: "/demo/multi-connection", label: "Multiple connections" },
+				{ href: "/demo/high-frequency-stream", label: "High-frequency stream" },
 				{ href: "/demo/inspector", label: "Inspector" },
 			],
 		},
@@ -64,6 +66,19 @@ export const siteConfig: SiteConfig = {
 					label: "vs react-use-websocket",
 				},
 				{ href: "/docs/vs-socket-io", label: "vs Socket.IO" },
+			],
+		},
+		{
+			title: "Migrate",
+			links: [
+				{
+					href: "/docs/migrate-from-react-use-websocket",
+					label: "from react-use-websocket",
+				},
+				{
+					href: "/docs/migrate-from-socket-io",
+					label: "from socket.io-client",
+				},
 			],
 		},
 	],

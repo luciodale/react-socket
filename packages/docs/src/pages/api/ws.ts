@@ -15,7 +15,9 @@ type TClientMsg =
 	| { type: "auth"; token: string }
 	| { type: "simulate-session-expiry" }
 	| { type: "subscribe-notifications" }
-	| { type: "unsubscribe-notifications" };
+	| { type: "unsubscribe-notifications" }
+	| { type: "subscribe-ticks" }
+	| { type: "unsubscribe-ticks" };
 
 type TServerMsg =
 	| { type: "pong" }
@@ -38,7 +40,8 @@ type TServerMsg =
 	| { type: "auth-required" }
 	| { type: "auth-expired" }
 	| { type: "auth-ok"; userId: string }
-	| { type: "notification"; id: string; title: string; body: string };
+	| { type: "notification"; id: string; title: string; body: string }
+	| { type: "tick"; n: number; ts: number };
 
 // ── Handler ─────────────────────────────────────────────────────────
 
@@ -194,6 +197,23 @@ export const GET: APIRoute = async ({ request }) => {
 		}, 4000);
 	}
 
+	let ticksInterval: ReturnType<typeof setInterval> | null = null;
+	function stopTicks() {
+		if (ticksInterval) {
+			clearInterval(ticksInterval);
+			ticksInterval = null;
+		}
+	}
+	function startTicks() {
+		stopTicks();
+		let n = 0;
+		ticksInterval = setInterval(() => {
+			const msg: TServerMsg = { type: "tick", n, ts: Date.now() };
+			server.send(JSON.stringify(msg));
+			n += 1;
+		}, 20);
+	}
+
 	server.addEventListener("message", (event: MessageEvent) => {
 		try {
 			const msg = JSON.parse(event.data as string) as TClientMsg;
@@ -205,6 +225,14 @@ export const GET: APIRoute = async ({ request }) => {
 				stopNotifications();
 				return;
 			}
+			if (msg.type === "subscribe-ticks") {
+				startTicks();
+				return;
+			}
+			if (msg.type === "unsubscribe-ticks") {
+				stopTicks();
+				return;
+			}
 			handleMessage(server, msg);
 		} catch {
 			// ignore invalid JSON
@@ -213,6 +241,7 @@ export const GET: APIRoute = async ({ request }) => {
 
 	server.addEventListener("close", () => {
 		stopNotifications();
+		stopTicks();
 	});
 
 	// @ts-expect-error CF Workers Response extension: webSocket property

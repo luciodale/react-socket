@@ -1,0 +1,183 @@
+---
+import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
+import PropsTable from "@luciodale/docs-ui-kit/components/PropsTable.astro";
+import DocsPage from "../../layouts/DocsPage.astro";
+import { href } from "../../lib/link";
+
+export const prerender = true;
+
+const beforeSample = `import useWebSocket, { ReadyState } from "react-use-websocket";
+
+function Chat() {
+  const { sendJsonMessage, lastJsonMessage, readyState } = useWebSocket(
+    "wss://api.example.com/ws",
+    {
+      shouldReconnect: () => true,
+      reconnectAttempts: 5,
+      reconnectInterval: (attempt) => Math.min(1000 * 2 ** attempt, 5000),
+    },
+  );
+
+  useEffect(() => {
+    if (lastJsonMessage?.type === "chat") {
+      appendMessage(lastJsonMessage);
+    }
+  }, [lastJsonMessage]);
+
+  return (
+    <button
+      disabled={readyState !== ReadyState.OPEN}
+      onClick={() => sendJsonMessage({ type: "chat", text: "hi" })}
+    >
+      Send
+    </button>
+  );
+}`;
+
+const afterSample = `import {
+  WebSocketManager,
+  useSocketConnectionState,
+  useSocketEvent,
+  useSocketSend,
+} from "@luciodale/react-socket";
+
+type TClientMsg = { type: "chat"; text: string };
+type TServerMsg = { type: "chat"; text: string };
+
+const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  url: "wss://api.example.com/ws",
+  serialize: (m) => JSON.stringify(m),
+  deserialize: (r) => JSON.parse(r),
+  reconnectMaxAttempts: 5,
+  reconnectBaseDelayMs: 1_000,
+  reconnectMaxDelayMs: 5_000,
+});
+
+function Chat() {
+  const state = useSocketConnectionState(manager);
+  const { send } = useSocketSend(manager);
+
+  useSocketEvent(manager, "chat", (msg) => {
+    appendMessage(msg);
+  });
+
+  return (
+    <button
+      disabled={state !== "connected"}
+      onClick={() => send({ type: "chat", text: "hi" })}
+    >
+      Send
+    </button>
+  );
+}`;
+
+const refCountedSample = `// react-use-websocket: each component opens its own WebSocket if you call
+// the hook with the same URL. Sharing requires a context provider you build
+// yourself.
+
+// react-socket: define the manager once at module scope. N components can
+// useSocketSubscription on the same key; the library ref counts and only
+// sends one subscribe to the server.
+useSocketSubscription(manager, {
+  key: "room:" + roomId,
+  subscribe: { type: "subscribe", roomId },
+  unsubscribe: { type: "unsubscribe", roomId },
+});`;
+---
+
+<DocsPage
+	title="Migrate from react-use-websocket"
+	description="Practical step-by-step migration with side-by-side examples and an API mapping table."
+>
+	<ContentSection label="Migrate from react-use-websocket">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			<InlineCode>react-use-websocket</InlineCode> is a thin hook over the
+			browser <InlineCode>WebSocket</InlineCode>. It works for small surfaces
+			but you build everything else yourself: type safety, subscription
+			ref counting, in-flight tracking, optimistic updates, structured debug.
+			This page is a practical conversion guide, not a feature comparison.
+		</p>
+		<p class="text-white/60 leading-relaxed">
+			See also <a href={href("/docs/vs-react-use-websocket")} class="text-accent hover:underline">vs react-use-websocket</a>
+			for the side-by-side trade-offs.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="API mapping">
+		<PropsTable
+			rows={[
+				{ name: "useWebSocket(url, options)", type: "→ new WebSocketManager + hooks", description: "Construct the manager once at module scope; consume it via hooks where needed" },
+				{ name: "sendJsonMessage(msg)", type: "→ useSocketSend().send(msg)", description: "Typed against TClientMsg" },
+				{ name: "lastJsonMessage", type: "→ useSocketEvent(manager, type, handler)", description: "Push handlers per discriminator value, not pull from a state slot" },
+				{ name: "readyState", type: "→ useSocketConnectionState(manager)", description: 'Returns "disconnected" | "connecting" | "connected" | "reconnecting"' },
+				{ name: "shouldReconnect / reconnectAttempts / reconnectInterval", type: "→ reconnectMaxAttempts / reconnectBaseDelayMs / reconnectMaxDelayMs", description: "Exponential backoff with jitter is built in" },
+				{ name: "onOpen / onClose / onError", type: "→ onConnectionStateChange or useSocketReady", description: "Reacting to a successful (re)connect is what onReady is for" },
+				{ name: "filter", type: "→ deserialize + useSocketEvent narrowing", description: "Decide what to keep at deserialize boundary; narrow with discriminator" },
+				{ name: "share / heartbeat", type: "→ module-level manager + ping / isPong config", description: "Sharing is automatic; ping is opt-in via the ping callback" },
+			]}
+		/>
+	</ContentSection>
+
+	<ContentSection label="Before: react-use-websocket">
+		<CodeBlock code={beforeSample} language="tsx" filename="Chat.tsx (before)" />
+	</ContentSection>
+
+	<ContentSection label="After: react-socket">
+		<CodeBlock code={afterSample} language="tsx" filename="Chat.tsx (after)" />
+		<Callout type="tip" title="Manager lives outside the component">
+			<InlineCode>useWebSocket</InlineCode> creates the connection inside the
+			component. <InlineCode>WebSocketManager</InlineCode> is module-level and
+			reused across renders, components, and routes. One connection, many
+			subscribers.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Subscriptions: built in, not built by you">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			A common workaround in <InlineCode>react-use-websocket</InlineCode> apps
+			is a context provider that ref counts subscriptions over a shared
+			socket. <InlineCode>useSocketSubscription</InlineCode> does this
+			natively:
+		</p>
+		<CodeBlock code={refCountedSample} language="tsx" filename="PriceBadge.tsx" />
+	</ContentSection>
+
+	<ContentSection label="Step by step">
+		<ol class="list-decimal list-inside space-y-3 text-white/60">
+			<li>Define <InlineCode>TClientMsg</InlineCode> / <InlineCode>TServerMsg</InlineCode> discriminated unions for everything you currently send and receive.</li>
+			<li>Create one <InlineCode>WebSocketManager</InlineCode> at module scope, pass <InlineCode>serialize</InlineCode> / <InlineCode>deserialize</InlineCode> wrapping your current parser.</li>
+			<li>Move every <InlineCode>useEffect</InlineCode> watching <InlineCode>lastJsonMessage</InlineCode> into a <InlineCode>useSocketEvent</InlineCode> per discriminator value.</li>
+			<li>Replace <InlineCode>sendJsonMessage</InlineCode> calls with <InlineCode>useSocketSend</InlineCode>.</li>
+			<li>Replace <InlineCode>readyState</InlineCode> branches with <InlineCode>useSocketConnectionState</InlineCode>; map your old <InlineCode>ReadyState</InlineCode> constants to the new string literals.</li>
+			<li>Move reconnect tuning into the manager config; delete your custom <InlineCode>shouldReconnect</InlineCode> closures.</li>
+			<li>If you had a homegrown subscription provider, drop it. Use <InlineCode>useSocketSubscription</InlineCode> with a key per logical stream.</li>
+			<li>If you tracked acks manually, define <InlineCode>getAckId</InlineCode> in the manager config; the in-flight registry clears automatically.</li>
+		</ol>
+	</ContentSection>
+
+	<ContentSection label="Gotchas">
+		<ul class="list-disc list-inside space-y-2 text-white/60">
+			<li><InlineCode>react-use-websocket</InlineCode>'s <InlineCode>lastJsonMessage</InlineCode> is one slot. If two messages of different types land in the same render, one slot only holds the latest. <InlineCode>useSocketEvent</InlineCode> never drops messages.</li>
+			<li>Re-renders. The original triggers a re-render on every received message via <InlineCode>lastJsonMessage</InlineCode>. <InlineCode>useSocketEvent</InlineCode> only re-renders if your handler updates state.</li>
+			<li>Auth. The original gives you no help; consult <a href={href("/docs/auth")} class="text-accent hover:underline">Authentication</a> for first-message and URL-based options.</li>
+			<li>If you used <InlineCode>options.share</InlineCode> across components, you no longer need it. The module-level manager is the share.</li>
+		</ul>
+	</ContentSection>
+
+	<ContentSection label="Next steps">
+		<ul class="space-y-2 text-white/60">
+			<li>
+				<a href={href("/docs/getting-started")} class="text-accent hover:underline">Getting started</a> — quick start in five minutes
+			</li>
+			<li>
+				<a href={href("/docs/auth")} class="text-accent hover:underline">Authentication</a> — first-message auth pattern
+			</li>
+			<li>
+				<a href={href("/docs/testing")} class="text-accent hover:underline">Testing</a> — MockTransport for unit tests
+			</li>
+		</ul>
+	</ContentSection>
+</DocsPage>

@@ -1,0 +1,226 @@
+---
+import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
+import PropsTable from "@luciodale/docs-ui-kit/components/PropsTable.astro";
+import DocsPage from "../../layouts/DocsPage.astro";
+import { href } from "../../lib/link";
+
+export const prerender = true;
+
+const beforeSample = `import { io } from "socket.io-client";
+
+const socket = io("https://api.example.com", {
+  auth: { token: getAccessToken() },
+});
+
+socket.on("connect", () => {
+  socket.emit("join", "room:42");
+});
+
+socket.on("chat", (msg) => {
+  appendMessage(msg);
+});
+
+function send(text: string) {
+  socket.emit("chat", { text }, (ack) => {
+    if (ack.ok) markDelivered(ack.id);
+  });
+}`;
+
+const afterSample = `import {
+  WebSocketManager,
+  useSocketEvent,
+  useSocketSend,
+  useSocketSubscription,
+} from "@luciodale/react-socket";
+
+type TClientMsg =
+  | { type: "auth"; token: string }
+  | { type: "join"; room: string }
+  | { type: "leave"; room: string }
+  | { type: "chat"; id: string; text: string };
+
+type TServerMsg =
+  | { type: "auth-ok"; userId: string }
+  | { type: "chat"; id: string; text: string }
+  | { type: "delivered"; ackId: string };
+
+const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  url: "wss://api.example.com/ws",
+  serialize: (m) => JSON.stringify(m),
+  deserialize: (r) => JSON.parse(r),
+  getAckId: (m) => (m.type === "delivered" ? m.ackId : undefined),
+  onReady() {
+    manager.send({ data: { type: "auth", token: getAccessToken() } });
+  },
+});
+
+function ChatRoom({ room }: { room: string }) {
+  const { send } = useSocketSend(manager);
+
+  useSocketSubscription(manager, {
+    key: room,
+    subscribe: { type: "join", room },
+    unsubscribe: { type: "leave", room },
+  });
+
+  useSocketEvent(manager, "chat", (msg) => appendMessage(msg));
+
+  return (
+    <button
+      onClick={() =>
+        send({ type: "chat", id: crypto.randomUUID(), text: "hi" }, "ack-id")
+      }
+    >
+      Send
+    </button>
+  );
+}`;
+
+const ackSample = `// socket.io: emit takes a callback, server invokes it on ack.
+socket.emit("chat", payload, (ack) => {
+  if (ack.ok) markDelivered(ack.id);
+});
+
+// react-socket: pass an ackId on send, define getAckId in the config.
+// The library tracks in-flight automatically; the callback sits at the
+// receive boundary instead of the send boundary.
+manager.send({ data: payload, ackId: "ack-1" });
+
+useSocketEvent(manager, "delivered", (msg) => {
+  markDelivered(msg.ackId);
+});
+
+// On disconnect, anything still in flight is reported once via
+// onInFlightDrop, so you can mark it failed in one place.`;
+
+const broadcastSample = `// socket.io rooms are server-side groupings the server pushes to.
+// react-socket has no notion of rooms; the server pushes whatever it wants
+// to the connected client. The client tells the server which streams it
+// cares about via subscriptions, ref counted on the client.
+
+// If your server already does join/leave by name, the only client change
+// is mapping io's emit("join", room) and on(room, fn) into one
+// useSocketSubscription with subscribe / unsubscribe payloads and a
+// useSocketEvent listening for the typed chat / update / etc messages.`;
+---
+
+<DocsPage
+	title="Migrate from socket.io-client"
+	description="Map rooms to subscriptions, ack callbacks to typed delivered events, server-side magic to a plain protocol."
+>
+	<ContentSection label="Migrate from socket.io-client">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Socket.IO is more than a transport. It bundles its own protocol on top
+			of WebSocket, plus rooms, namespaces, and ack callbacks. react-socket
+			is a thin manager around the standard <InlineCode>WebSocket</InlineCode>
+			API. Migrating means picking up the protocol shape your server already
+			speaks (or settling on one) and dropping the framework abstractions.
+		</p>
+		<p class="text-white/60 leading-relaxed">
+			See also <a href={href("/docs/vs-socket-io")} class="text-accent hover:underline">vs Socket.IO</a>
+			for the side-by-side trade-offs.
+		</p>
+		<Callout type="warning" title="Server side is not free">
+			If your server uses the Socket.IO server library, your wire protocol
+			today is Socket.IO's, not raw WebSocket. To migrate the client you
+			either need a plain WebSocket endpoint on the server, or stay with
+			Socket.IO. This guide assumes you control both ends or have a plain
+			WS endpoint planned.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Concept mapping">
+		<PropsTable
+			rows={[
+				{ name: "io(url, options.auth)", type: "→ new WebSocketManager + onReady auth", description: "Send auth as the first message via onReady; see Authentication guide" },
+				{ name: 'socket.on(event, fn)', type: "→ useSocketEvent(manager, type, fn)", description: "Discriminator narrows the message type automatically" },
+				{ name: "socket.emit(event, payload)", type: "→ useSocketSend().send({ type: event, ...payload })", description: "Events are encoded as the discriminator field on a typed message" },
+				{ name: "socket.emit(event, payload, ack)", type: "→ send + useSocketEvent on the delivered type", description: "Pass ackId on send; getAckId resolves the in-flight entry; delivered handler runs UI updates" },
+				{ name: "Rooms (server-side)", type: "→ subscribe / unsubscribe messages", description: "react-socket has no rooms. The server still groups; the client just sends a typed subscribe payload" },
+				{ name: "io.connect / disconnect", type: "→ manager.connect() / manager.disconnect()", description: "Lifecycle is explicit" },
+				{ name: "Reconnect: built in", type: "→ also built in", description: "reconnectMaxAttempts / Base / Max delays; same exponential backoff with jitter" },
+				{ name: "Acks: ack callback", type: "→ ackId + getAckId + delivered event", description: "Receive-side handler instead of send-side closure; in-flight registry handles drops" },
+				{ name: "Namespaces", type: "→ multiple WebSocketManager instances", description: "If you really need isolation, see Multiple connections" },
+				{ name: "binary: enabled by default", type: "→ binaryType + TWire generic", description: "Opt-in; widen the wire type, set binaryType. See Binary frames" },
+			]}
+		/>
+	</ContentSection>
+
+	<ContentSection label="Before: socket.io-client">
+		<CodeBlock code={beforeSample} language="tsx" filename="chat.ts (before)" />
+	</ContentSection>
+
+	<ContentSection label="After: react-socket">
+		<CodeBlock code={afterSample} language="tsx" filename="ChatRoom.tsx (after)" />
+		<Callout type="tip" title="Discriminated unions replace event-name strings">
+			Socket.IO maps event names to handlers at runtime. react-socket maps
+			a discriminator field (default <InlineCode>"type"</InlineCode>) to a
+			variant of <InlineCode>TServerMsg</InlineCode>. Same idea, but the
+			compiler enforces it.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Acks: callback to delivered event">
+		<CodeBlock code={ackSample} language="tsx" filename="ack.ts" />
+	</ContentSection>
+
+	<ContentSection label="Rooms become subscriptions">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Socket.IO's rooms are a server-side concept. The client only knows it
+			emitted a join. react-socket pushes the same workflow into the
+			protocol: send a <InlineCode>subscribe</InlineCode> payload, listen
+			for the typed chat or update message. The library ref counts so N
+			components can subscribe to the same room without N joins.
+		</p>
+		<CodeBlock code={broadcastSample} language="tsx" filename="rooms.ts" />
+	</ContentSection>
+
+	<ContentSection label="Step by step">
+		<ol class="list-decimal list-inside space-y-3 text-white/60">
+			<li>Decide the wire protocol. Pick a discriminator field (commonly <InlineCode>"type"</InlineCode>). List every client and server message variant.</li>
+			<li>If your server still runs Socket.IO, expose a plain WS endpoint that speaks your new protocol. Migrate one feature at a time behind a feature flag.</li>
+			<li>Build <InlineCode>TClientMsg</InlineCode> / <InlineCode>TServerMsg</InlineCode> unions; convert <InlineCode>socket.on(event, fn)</InlineCode> calls into <InlineCode>useSocketEvent</InlineCode>.</li>
+			<li>Move auth out of <InlineCode>{"io(url, { auth })"}</InlineCode>. Pick a strategy from the <a href={href("/docs/auth")} class="text-accent hover:underline">Authentication</a> guide; first-message is the closest to Socket.IO's auth handshake.</li>
+			<li>Translate ack callbacks. Add <InlineCode>getAckId</InlineCode> to the config and a <InlineCode>delivered</InlineCode> server variant. Replace each <InlineCode>emit(..., cb)</InlineCode> with a paired <InlineCode>send + useSocketEvent("delivered")</InlineCode>.</li>
+			<li>Replace room joins with <InlineCode>useSocketSubscription</InlineCode>. The component owns the lifecycle; the library ref counts.</li>
+			<li>If you used multiple namespaces, decide whether you really need multiple managers. Most cases collapse into one. See <a href={href("/demo/multi-connection")} class="text-accent hover:underline">Multiple connections</a> if you do.</li>
+			<li>Wire <InlineCode>onInFlightDrop</InlineCode> to your retry / failed UI. Socket.IO's volatile vs reliable distinction maps to whether you set <InlineCode>ackId</InlineCode>.</li>
+		</ol>
+	</ContentSection>
+
+	<ContentSection label="What you give up">
+		<ul class="list-disc list-inside space-y-2 text-white/60">
+			<li>Long-polling fallback. WebSocket is the only transport.</li>
+			<li>Server-side rooms / broadcast helpers. You implement those on the server with whatever WS library you use.</li>
+			<li>Built-in binary message types as a first-class concept. react-socket supports binary, but you opt in via the wire type generic.</li>
+			<li>Magic ack callbacks. You get the same semantics, but the wiring is explicit.</li>
+		</ul>
+	</ContentSection>
+
+	<ContentSection label="What you gain">
+		<ul class="list-disc list-inside space-y-2 text-white/60">
+			<li>Fully typed protocol. The compiler catches missing variants.</li>
+			<li>Smaller client bundle (the manager is a few kilobytes; Socket.IO ships its own protocol code).</li>
+			<li>Subscription ref counting on the client.</li>
+			<li>Pluggable transport for tests via <InlineCode>MockTransport</InlineCode>.</li>
+			<li>Inspector for development debugging without touching network panel internals.</li>
+		</ul>
+	</ContentSection>
+
+	<ContentSection label="Next steps">
+		<ul class="space-y-2 text-white/60">
+			<li>
+				<a href={href("/docs/getting-started")} class="text-accent hover:underline">Getting started</a> — quick start
+			</li>
+			<li>
+				<a href={href("/docs/auth")} class="text-accent hover:underline">Authentication</a> — first-message and URL-based auth
+			</li>
+			<li>
+				<a href={href("/docs/optimistic-updates")} class="text-accent hover:underline">Sending Messages</a> — ack tracking and optimistic UI
+			</li>
+		</ul>
+	</ContentSection>
+</DocsPage>

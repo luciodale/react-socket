@@ -70,26 +70,37 @@ Open items rolled forward:
 
 ## Sprint 4 — Migrations + production debug
 
-Status: **not started**.
+Status: **complete**.
 
-Goals:
-1. Make adoption from existing libraries low friction.
-2. Give consumers a recipe for shipping debug events to monitoring.
+- [x] `/docs/migrate-from-react-use-websocket` page: API mapping table, before/after side-by-side, ref-counted subscriptions sketch, step-by-step list, gotchas (lastJsonMessage drops, re-render churn, manual auth)
+- [x] `/docs/migrate-from-socket-io` page: concept mapping table, before/after, ack callback → delivered event pattern, rooms → subscriptions, step-by-step, what you give up vs gain. Includes a server-side caveat callout
+- [x] `/docs/monitoring` page: Sentry breadcrumbs + capture, Datadog logs, sampling, redaction, custom metrics, when to use `onDebug` vs `addDebugListener`
+- [x] Sidebar: Monitoring under Guides; new "Migrate" section with both migration pages
 
-Tasks:
-- [ ] Migration guide: `react-use-websocket` → `react-socket` (mapping table + worked example)
-- [ ] Migration guide: `socket.io-client` → `react-socket` (rooms → subscriptions, events → discriminated unions, ack → in-flight tracking)
-- [ ] Production debug export recipe (Sentry / Datadog) using the existing `onDebug` callback
-- [ ] Optional: a small `createSentryReporter()` example in the patterns page
+Quality gate: astro build prerenders all three new pages (`migrate-from-react-use-websocket`, `migrate-from-socket-io`, `monitoring`); existing pages and demos unaffected.
+
+Open items:
+- A `createSentryReporter()` helper export was on the maybe list. Not added — the inline `onDebug` switch in the docs is enough for most users; helper can come later if multiple users ask.
 
 ## Dropped from original plan
 
 - SSR / hydration positioning (Phase 5). Dropped per user direction.
 
-## Cross-sprint cleanup
+## Sprint 5 — Pre-release polish
 
-Tracked here so we do not lose the items between sprints:
+Status: **complete**.
 
-- [ ] Pre-existing biome lint noise in generated `.mjs` / `.d.mts` files: add a biome ignore or fix the source files that emit them
-- [ ] Decide whether to rename component file `AuthRefresh.tsx` → `FirstMessageAuth.tsx` for clarity (URL stays `/demo/auth-refresh`)
-- [ ] Consider adding `predev` script in docs that runs `bun run build:lib` so the dist stays in sync with library source during dev
+- [x] Library version bumped to 0.0.5
+- [x] Biome ignores generated `.d.mts`, `.mjs`, `dist`, `_pagefind`, `wrangler.jsonc`, build artifacts. `bun run lint` is clean across the repo
+- [x] `scripts/check-single-react.sh` asserts exactly one React install (realpath-deduped). Wired as `bun run check:single-react` and into `bun run test`
+- [x] Root `dev` script now runs `check:single-react` + `build:lib` before `--filter react-socket-docs dev`, so dual-React and stale dist regressions are caught before the dev server boots
+- [x] Demo component renamed `AuthRefresh.tsx` → `FirstMessageAuth.tsx`; URL stays `/demo/auth-refresh`
+- [x] Library README rewritten: ten hooks, testing subpath, binary frames, auth, full pointer set
+- [x] High-frequency stream demo (`/demo/high-frequency-stream`): server pushes 50 ticks/sec via `subscribe-ticks` / `unsubscribe-ticks`, side-by-side panels show `useSocketEvent` (per-tick render) vs `useSocketEventBatch` (one render per 100ms flush)
+- [x] `createSentryReporter` recipe on `/docs/monitoring`: drop-in helper bundling breadcrumbs, sampling, redaction, reconnect-storm alert. Returns unsubscribe.
+
+Quality gates: 201 tests pass, root + docs tsc clean, biome clean across 71 files, astro build prerenders all new pages, single-React guard passes.
+
+## Cross-sprint cleanup remaining
+
+(none open at this point)
