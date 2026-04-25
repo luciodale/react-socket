@@ -89,6 +89,7 @@ export class WebSocketManager<
 	private disposed = false;
 	private debugEventCounter = 0;
 	private connectAttemptId = 0;
+	private windowListenersAttached = false;
 
 	constructor(
 		config: TManagerConfig<TClientMsg, TServerMsg, TKey, TWire, TIncoming>,
@@ -143,14 +144,11 @@ export class WebSocketManager<
 		this.transport.onopen = () => this.handleOpen();
 		this.transport.onclose = (e) => this.handleClose(e);
 		this.transport.onmessage = (e) => this.handleMessage(e);
-		this.transport.onerror = () => {};
+		this.transport.onerror = () => this.emitDebug({ type: "transport-error" });
 
 		this.initiateTransportConnect(++this.connectAttemptId);
 
-		if (typeof window !== "undefined") {
-			window.addEventListener("online", this.handleOnline);
-			window.addEventListener("offline", this.handleOffline);
-		}
+		this.addWindowListeners();
 	}
 
 	private initiateTransportConnect(attemptId: number): void {
@@ -547,7 +545,8 @@ export class WebSocketManager<
 			this.transport.onopen = () => this.handleOpen();
 			this.transport.onclose = (e) => this.handleClose(e);
 			this.transport.onmessage = (e) => this.handleMessage(e);
-			this.transport.onerror = () => {};
+			this.transport.onerror = () =>
+				this.emitDebug({ type: "transport-error" });
 			this.initiateTransportConnect(++this.connectAttemptId);
 		}, delay);
 	}
@@ -679,10 +678,20 @@ export class WebSocketManager<
 		this.protocols = [...protocols];
 	}
 
+	private addWindowListeners(): void {
+		if (this.windowListenersAttached) return;
+		if (typeof window === "undefined") return;
+		window.addEventListener("online", this.handleOnline);
+		window.addEventListener("offline", this.handleOffline);
+		this.windowListenersAttached = true;
+	}
+
 	private removeWindowListeners(): void {
+		if (!this.windowListenersAttached) return;
 		if (typeof window !== "undefined") {
 			window.removeEventListener("online", this.handleOnline);
 			window.removeEventListener("offline", this.handleOffline);
 		}
+		this.windowListenersAttached = false;
 	}
 }

@@ -429,7 +429,8 @@
 }
 
 .rsi-event-type[data-type="deserialize-error"],
-.rsi-event-type[data-type="url-resolve-error"] {
+.rsi-event-type[data-type="url-resolve-error"],
+.rsi-event-type[data-type="transport-error"] {
 	color: var(--rsi-error);
 }
 

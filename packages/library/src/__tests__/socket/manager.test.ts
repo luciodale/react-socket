@@ -1098,4 +1098,61 @@ describe("WebSocketManager", () => {
 			expect(transport.connectCalls[0].url).toBe("ws://test?token=fresh");
 		});
 	});
+
+	describe("window listener attachment", () => {
+		it("does not double-attach when connect() is called from reconnecting state", () => {
+			if (typeof window === "undefined") return;
+			const { manager, transport } = createManager({
+				reconnectBaseDelayMs: 10,
+				reconnectMaxAttempts: 3,
+			});
+			const addSpy = vi.spyOn(window, "addEventListener");
+			const removeSpy = vi.spyOn(window, "removeEventListener");
+
+			manager.connect();
+			transport.simulateOpen();
+			const initialAdds = addSpy.mock.calls.filter(
+				(c) => c[0] === "online" || c[0] === "offline",
+			).length;
+			expect(initialAdds).toBe(2);
+
+			// Force the manager into "reconnecting"
+			transport.simulateClose(1006);
+
+			// Calling connect() again from reconnecting must not add another pair
+			manager.connect();
+			const totalAdds = addSpy.mock.calls.filter(
+				(c) => c[0] === "online" || c[0] === "offline",
+			).length;
+			expect(totalAdds).toBe(2);
+
+			manager.disconnect();
+			const totalRemoves = removeSpy.mock.calls.filter(
+				(c) => c[0] === "online" || c[0] === "offline",
+			).length;
+			expect(totalRemoves).toBe(2);
+
+			addSpy.mockRestore();
+			removeSpy.mockRestore();
+		});
+	});
+
+	describe("transport-error debug event", () => {
+		it("emits transport-error when the transport fires onerror", () => {
+			const debugEvents: string[] = [];
+			const transport = new MockTransport();
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+				onDebug: (e) => debugEvents.push(e.type),
+			});
+
+			manager.connect();
+			transport.simulateOpen();
+			transport.simulateError();
+
+			expect(debugEvents).toContain("transport-error");
+		});
+	});
 });

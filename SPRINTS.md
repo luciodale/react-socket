@@ -90,7 +90,7 @@ Open items:
 
 Status: **complete**.
 
-- [x] Library version bumped to 0.0.5
+- [x] Library version bumped to 0.5.0
 - [x] Biome ignores generated `.d.mts`, `.mjs`, `dist`, `_pagefind`, `wrangler.jsonc`, build artifacts. `bun run lint` is clean across the repo
 - [x] `scripts/check-single-react.sh` asserts exactly one React install (realpath-deduped). Wired as `bun run check:single-react` and into `bun run test`
 - [x] Root `dev` script now runs `check:single-react` + `build:lib` before `--filter react-socket-docs dev`, so dual-React and stale dist regressions are caught before the dev server boots

@@ -12,7 +12,7 @@ export const prerender = true;
 <DocsPage title="API Reference">
 	<ContentSection label="API at a glance">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			react-socket exposes a single manager class and nine React hooks. Each
+			react-socket exposes a single manager class and ten React hooks. Each
 			hook has one job. You never need to write a message switch, never touch
 			an internal lifecycle method from user code, never manually wire a
 			<InlineCode>useEffect</InlineCode> around a subscribe call.
@@ -62,9 +62,13 @@ export const prerender = true;
 
 	<ContentSection label="WebSocketManager">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			The core class. Three generics: client message type, server message
-			type, and the discriminator key (defaults to
-			<InlineCode>"type"</InlineCode>). See <a href={href("/docs/configuration")} class="text-accent hover:underline">Configuration</a> for all config options.
+			The core class. Five generics: client message type, server message
+			type, the discriminator key (defaults to <InlineCode>"type"</InlineCode>),
+			and two wire-data generics for binary frames (<InlineCode>TWire</InlineCode>
+			and <InlineCode>TIncoming</InlineCode>, both default to
+			<InlineCode>string</InlineCode>). See <a href={href("/docs/configuration")} class="text-accent hover:underline">Configuration</a>
+			for all config options and <a href={href("/docs/binary")} class="text-accent hover:underline">Binary frames</a>
+			for the wire-type generics.
 		</p>
 		<CodeBlock
 			code={`import { WebSocketManager } from "@luciodale/react-socket";
@@ -200,8 +204,7 @@ function onSubmit(text: string) {
 		<p class="text-white/60 mb-4 leading-relaxed">
 			Fires on every <InlineCode>send()</InlineCode> call, before the wire
 			attempt, even when offline. The right place for optimistic UI insert.
-			Receives the full <InlineCode>TSendParams</InlineCode> (data + ackId +
-			meta).
+			Receives the full <InlineCode>TSendParams</InlineCode> (data + ackId).
 		</p>
 		<CodeBlock
 			code={`useSocketSendIntent(manager, (params) => {
@@ -292,7 +295,10 @@ function onSubmit(text: string) {
 	<ContentSection label="Manager read APIs">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			These are not hooks. Use them from outside React or from imperative
-			code that already has the manager reference.
+			code that already has the manager reference. Targeted queries
+			(<InlineCode>getConnectionState</InlineCode>, <InlineCode>getRefCount</InlineCode>,
+			<InlineCode>hasPendingSubscription</InlineCode>) for single-key checks;
+			<InlineCode>getSnapshot()</InlineCode> for everything else in one read.
 		</p>
 		<CodeBlock
 			code={`// Connection
@@ -312,14 +318,22 @@ manager.subscribeToPendingSubscriptions(listener); // returns unsubscribe
 // Send
 manager.send({ data, ackId? });
 
+// Lifecycle listeners (every one returns an unsubscribe)
+manager.addSendIntentListener(listener);
+manager.addInFlightDropListener(listener);
+manager.addReadyListener(listener);
+manager.addLastUnsubscribeListener(listener);
+manager.addDebugListener(listener);
+
 // Protocols (replace, not append)
 manager.setProtocols(["graphql-ws"]);
 
-// Snapshot (for Inspector or tests)
-manager.getSnapshot();
-
-// Debug
-manager.addDebugListener(listener);`}
+// Snapshot — replaces the eight individual getters that used to exist
+const s = manager.getSnapshot();
+//   s.connectionState, s.subscriptionRefCounts, s.subscriptionData,
+//   s.pendingSubscriptions, s.inFlightMessages, s.reconnectAttempt,
+//   s.protocols, s.disposed, s.intentionalClose
+`}
 			language="tsx"
 			filename="manager-api.ts"
 		/>
@@ -377,7 +391,10 @@ await undelivered.init();`}
 			code={`import type {
   TConnectionState,        // connection state union
   TManagerConfig,          // constructor options
+  TManagerSnapshot,        // shape returned by manager.getSnapshot()
   TSendParams,             // argument to send()
+  TWireData,               // serialize() return: string | ArrayBuffer | ArrayBufferView | Blob
+  TIncomingData,           // deserialize() input: string | ArrayBuffer | Blob
   TDebugEvent,             // id + timestamp + payload
   TDebugEventPayload,      // payload portion
   TDebugEventType,         // union of debug event type strings

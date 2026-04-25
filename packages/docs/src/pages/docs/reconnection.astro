@@ -25,7 +25,7 @@ export const prerender = true;
 		</p>
 		<ol class="list-decimal list-inside space-y-2 text-white/60 mb-4">
 			<li>Sets the state to <InlineCode>"reconnecting"</InlineCode></li>
-			<li>Drops any in-flight messages and fires <InlineCode>onInFlightDrop</InlineCode></li>
+			<li>Drops any in-flight messages and notifies <InlineCode>useSocketInFlightDrop</InlineCode> listeners</li>
 			<li>Waits using exponential backoff with jitter</li>
 			<li>Opens a new connection</li>
 			<li>Re-sends all active subscriptions</li>
@@ -145,13 +145,13 @@ export const prerender = true;
 	<ContentSection label="Connection States">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			Track the connection state in your UI with the
-			<InlineCode>useConnectionState</InlineCode> hook:
+			<InlineCode>useSocketConnectionState</InlineCode> hook:
 		</p>
 		<CodeBlock
-			code={`import { useConnectionState } from "@luciodale/react-socket";
+			code={`import { useSocketConnectionState } from "@luciodale/react-socket";
 
 function ConnectionStatus() {
-  const state = useConnectionState(manager);
+  const state = useSocketConnectionState(manager);
 
   const labels = {
     disconnected: "Offline",

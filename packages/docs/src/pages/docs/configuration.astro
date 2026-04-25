@@ -38,14 +38,19 @@ export const prerender = true;
 				{ name: "reconnectMaxDelayMs", type: "number", defaultValue: "5000", description: "Maximum reconnection delay" },
 				{ name: "transport", type: "IWebSocketTransport", description: "Custom WebSocket transport for testing or non-browser environments" },
 				{ name: "binaryType", type: '"blob" | "arraybuffer"', description: "Tell the transport which binary type to deliver. Required when sending or receiving binary frames; widen the manager's TWire / TIncoming generics accordingly" },
-				{ name: "onSendIntent", type: "(params: TSendParams) => void", description: "Fires on every send(), even when offline. Use for optimistic UI" },
-				{ name: "onConnectionStateChange", type: "(state: TConnectionState) => void", description: "Fires when connection state changes" },
-				{ name: "onReady", type: "(restoredKeys: string[]) => void", description: "Fires after (re)connect once subscriptions are restored. Receives the list of keys the library replayed" },
-				{ name: "onInFlightDrop", type: "(messages) => void", description: "Fires when in-flight messages are dropped on disconnect" },
-				{ name: "onLastUnsubscribe", type: "(key, data) => void", description: "Fires when the last subscriber for a key leaves" },
-				{ name: "onDebug", type: "(event: TDebugEvent) => void", description: "Fires for every internal event" },
+				{ name: "onReady", type: "(restoredKeys: string[]) => void", description: "Fires after every (re)connect once subscriptions are restored. Best place for first-message auth and refetch logic that must run before any component mounts" },
+				{ name: "onDebug", type: "(event: TDebugEvent) => void", description: "Fires for every internal lifecycle event. Best place for production telemetry that should always run" },
 			]}
 		/>
+		<Callout type="tip" title="Other lifecycle events live on the manager">
+			Send-intent, connection-state, in-flight-drop, and last-unsubscribe
+			are exposed as <InlineCode>addXxxListener</InlineCode> methods on the
+			manager (and as React hooks: <InlineCode>useSocketSendIntent</InlineCode>,
+			<InlineCode>useSocketConnectionState</InlineCode>,
+			<InlineCode>useSocketInFlightDrop</InlineCode>,
+			<InlineCode>useSocketLastUnsubscribe</InlineCode>). Wire them where
+			they belong (typically inside React) so teardown is automatic.
+		</Callout>
 	</ContentSection>
 
 	<ContentSection label="Required options">
@@ -161,64 +166,51 @@ useSocketEvent(manager, "notification", (msg) => {
 		/>
 	</ContentSection>
 
-	<ContentSection label="Callbacks vs hooks">
+	<ContentSection label="Lifecycle: config vs listener">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Five of the optional callbacks (<InlineCode>onSendIntent</InlineCode>,
-			<InlineCode>onInFlightDrop</InlineCode>,
-			<InlineCode>onReady</InlineCode>,
-			<InlineCode>onLastUnsubscribe</InlineCode>,
-			<InlineCode>onConnectionStateChange</InlineCode>) have hook wrappers:
-			<InlineCode>useSocketSendIntent</InlineCode>,
-			<InlineCode>useSocketInFlightDrop</InlineCode>,
-			<InlineCode>useSocketReady</InlineCode>,
-			<InlineCode>useSocketLastUnsubscribe</InlineCode>,
-			<InlineCode>useSocketConnectionState</InlineCode>. Both layers fire
-			additively. Inside React prefer the hooks for component scoped
-			logic; fall back to callbacks for non React consumers or
-			bootstrap logic. See
-			<a href={href("/docs/getting-started#two-layers-callback-config-and-hook-wrappers")} class="text-accent hover:underline">Two layers</a>.
+			Two lifecycle events are exposed as construction-time callbacks
+			because they need to fire before any component mounts:
 		</p>
-	</ContentSection>
-
-	<ContentSection label="Optional callbacks">
 		<CodeBlock
-			code={`{
-  // Fires on every send(), even when offline. Optimistic UI goes here.
-  onSendIntent({ data, ackId }) {
-    if (data.type === "message" && ackId) {
-      store.addOptimistic(data, ackId);
-    }
+			code={`new WebSocketManager<TClientMsg, TServerMsg>({
+  // ...
+
+  // Fires after every (re)connect, once subscriptions are restored.
+  // Best place for first-message auth (no React mount needed).
+  async onReady(restoredKeys) {
+    const token = await auth.getValidAccessToken();
+    manager.send({ data: { type: "auth", token } });
   },
 
-  // Connection state transitions.
-  onConnectionStateChange(state) {
-    console.log("ws:", state);
-  },
-
-  // Fires after (re)connect once subscriptions are restored.
-  // restoredKeys is the list of subscriptions the library replayed.
-  onReady(restoredKeys) {
-    refetchInbox();
-    console.log("restored:", restoredKeys);
-  },
-
-  // In-flight messages that never got confirmed before a disconnect.
-  onInFlightDrop(messages) {
-    for (const { id } of messages) store.markFailed(id);
-  },
-
-  // Last subscriber for a key left. Clean up related state.
-  onLastUnsubscribe(key) {
-    store.clearChannel(key);
-  },
-
-  // Every internal event — useful for debugging / inspector.
+  // Fires for every internal event — feed monitoring, audit logs, etc.
   onDebug(event) {
-    console.log(event.type, event);
+    if (event.type === "deserialize-error") report(event.error);
   },
-}`}
+});`}
 			language="tsx"
-			filename="callbacks.ts"
+			filename="config-callbacks.ts"
+		/>
+		<p class="text-white/60 mt-4 mb-4 leading-relaxed">
+			Everything else uses an <InlineCode>addXxxListener</InlineCode> method
+			on the manager (or its React hook wrapper). Listeners return an
+			unsubscribe so teardown is automatic in React effects.
+		</p>
+		<CodeBlock
+			code={`// Imperative — outside React, or in a top-level bridge.
+const stop1 = manager.addSendIntentListener(({ data, ackId }) => { /* ... */ });
+const stop2 = manager.addInFlightDropListener((messages) => { /* ... */ });
+const stop3 = manager.addLastUnsubscribeListener((key, data) => { /* ... */ });
+const stop4 = manager.subscribeToConnectionState(() => {
+  const state = manager.getConnectionState();
+});
+
+// React — colocate with the component that owns the domain.
+useSocketSendIntent(manager, ({ data, ackId }) => { /* ... */ });
+useSocketInFlightDrop(manager, (messages) => { /* ... */ });
+useSocketLastUnsubscribe(manager, (key, data) => { /* ... */ });
+const state = useSocketConnectionState(manager);`}
+			language="tsx"
+			filename="lifecycle.ts"
 		/>
 	</ContentSection>
 

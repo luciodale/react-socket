@@ -94,7 +94,7 @@ useSocketEvent(manager, "delivered", (msg) => {
 });
 
 // On disconnect, anything still in flight is reported once via
-// onInFlightDrop, so you can mark it failed in one place.`;
+// useSocketInFlightDrop, so you can mark it failed in one place.`;
 
 const broadcastSample = `// socket.io rooms are server-side groupings the server pushes to.
 // react-socket has no notion of rooms; the server pushes whatever it wants
@@ -187,7 +187,7 @@ const broadcastSample = `// socket.io rooms are server-side groupings the server
 			<li>Translate ack callbacks. Add <InlineCode>getAckId</InlineCode> to the config and a <InlineCode>delivered</InlineCode> server variant. Replace each <InlineCode>emit(..., cb)</InlineCode> with a paired <InlineCode>send + useSocketEvent("delivered")</InlineCode>.</li>
 			<li>Replace room joins with <InlineCode>useSocketSubscription</InlineCode>. The component owns the lifecycle; the library ref counts.</li>
 			<li>If you used multiple namespaces, decide whether you really need multiple managers. Most cases collapse into one. See <a href={href("/demo/multi-connection")} class="text-accent hover:underline">Multiple connections</a> if you do.</li>
-			<li>Wire <InlineCode>onInFlightDrop</InlineCode> to your retry / failed UI. Socket.IO's volatile vs reliable distinction maps to whether you set <InlineCode>ackId</InlineCode>.</li>
+			<li>Wire <InlineCode>useSocketInFlightDrop</InlineCode> to your retry / failed UI. Socket.IO's volatile vs reliable distinction maps to whether you set <InlineCode>ackId</InlineCode>.</li>
 		</ol>
 	</ContentSection>
 

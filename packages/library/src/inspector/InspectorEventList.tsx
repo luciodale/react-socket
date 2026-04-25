@@ -55,6 +55,8 @@ function formatEventSummary<TClientMsg, TServerMsg>(
 			);
 		case "url-resolve-error":
 			return String(e.error);
+		case "transport-error":
+			return "";
 		case "dispose":
 			return "";
 	}

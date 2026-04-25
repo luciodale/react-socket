@@ -114,7 +114,7 @@ useSocketSubscription(manager, {
 				{ name: "lastJsonMessage", type: "→ useSocketEvent(manager, type, handler)", description: "Push handlers per discriminator value, not pull from a state slot" },
 				{ name: "readyState", type: "→ useSocketConnectionState(manager)", description: 'Returns "disconnected" | "connecting" | "connected" | "reconnecting"' },
 				{ name: "shouldReconnect / reconnectAttempts / reconnectInterval", type: "→ reconnectMaxAttempts / reconnectBaseDelayMs / reconnectMaxDelayMs", description: "Exponential backoff with jitter is built in" },
-				{ name: "onOpen / onClose / onError", type: "→ onConnectionStateChange or useSocketReady", description: "Reacting to a successful (re)connect is what onReady is for" },
+				{ name: "onOpen / onClose / onError", type: "→ onReady config callback or useSocketConnectionState hook", description: "Reacting to a successful (re)connect is what onReady is for; for state transitions use useSocketConnectionState in React or manager.subscribeToConnectionState outside" },
 				{ name: "filter", type: "→ deserialize + useSocketEvent narrowing", description: "Decide what to keep at deserialize boundary; narrow with discriminator" },
 				{ name: "share / heartbeat", type: "→ module-level manager + ping / isPong config", description: "Sharing is automatic; ping is opt-in via the ping callback" },
 			]}

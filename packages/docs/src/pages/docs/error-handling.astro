@@ -42,9 +42,9 @@ function handleSend(text: string) {
 		/>
 		<Callout type="tip" title="Queue instead of dropping">
 			If you want the message to go out on the next reconnect, pair
-			<InlineCode>onSendIntent</InlineCode> with
-			<InlineCode>onInFlightDrop</InlineCode> to capture and replay. The
-			<a href={href("/docs/undelivered-sync")} class="text-accent hover:underline">Undelivered Sync</a>
+			<InlineCode>useSocketSendIntent</InlineCode> with
+			<InlineCode>useSocketInFlightDrop</InlineCode> to capture and replay.
+			The <a href={href("/docs/undelivered-sync")} class="text-accent hover:underline">Undelivered Sync</a>
 			guide shows the full pattern.
 		</Callout>
 	</ContentSection>
@@ -128,14 +128,15 @@ function handleSend(text: string) {
 			transition and offer a manual retry:
 		</p>
 		<CodeBlock
-			code={`onConnectionStateChange(state) {
+			code={`manager.subscribeToConnectionState(() => {
+  const state = manager.getConnectionState();
   if (state === "disconnected" && manager.getSnapshot().reconnectAttempt >= MAX) {
     notify({
       title: "Connection lost",
       action: { label: "Retry", onClick: () => manager.connect() },
     });
   }
-}`}
+});`}
 			language="tsx"
 			filename="manager.ts"
 		/>

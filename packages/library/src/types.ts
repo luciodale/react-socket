@@ -136,6 +136,7 @@ export type TDebugEventPayload<TClientMsg, TServerMsg> =
 	| { type: "ready"; restoredKeys: string[] }
 	| { type: "deserialize-error"; raw: TIncomingData; error: unknown }
 	| { type: "url-resolve-error"; error: unknown }
+	| { type: "transport-error" }
 	| { type: "dispose" };
 
 export type TDebugEvent<TClientMsg, TServerMsg> = {

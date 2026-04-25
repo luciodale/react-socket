@@ -31,7 +31,7 @@ export const prerender = true;
 		</p>
 		<ol class="list-decimal list-inside space-y-2 text-white/60 mb-4">
 			<li>User sends a message while online — it enters the in-flight map</li>
-			<li>Connection drops before the server confirms — <InlineCode>onInFlightDrop</InlineCode> fires</li>
+			<li>Connection drops before the server confirms — <InlineCode>useSocketInFlightDrop</InlineCode> fires</li>
 			<li>Save the dropped messages to the undelivered store</li>
 			<li>On reconnect, <InlineCode>onReady</InlineCode> retries them</li>
 		</ol>
@@ -141,43 +141,31 @@ const unsub = undelivered.subscribe(() => {
 
 	<ContentSection label="Integration with the Manager">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Wire the undelivered store into the manager's callbacks. There are two
-			save paths: <InlineCode>onInFlightDrop</InlineCode> for
-			messages dropped on disconnect, and a check on
-			<InlineCode>send()</InlineCode>'s return value for messages
-			sent while already offline:
+			Wire the undelivered store into the manager. There are two save paths:
+			the <InlineCode>useSocketInFlightDrop</InlineCode> hook for messages
+			dropped on disconnect, and a check on
+			<InlineCode>send()</InlineCode>'s return value for messages sent
+			while already offline:
 		</p>
 		<CodeBlock
-			code={`const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+			code={`// Assumption: the server echoes both ackId and channel in the confirm
+// so the bridge has enough info to remove the right entry.
+type TServerMsg =
+  | { type: "delivered"; ackId: string; channel: string }
+  | { type: "chat"; /* ... */ };
+
+const manager = new WebSocketManager<TClientMsg, TServerMsg>({
   // ...
 
-  // Save messages that were in-flight when the connection dropped
-  onInFlightDrop(messages) {
-    for (const { id, data } of messages) {
-      if (data.action === "message") {
-        undelivered.addMessage(data.channel, {
-          id,
-          channel: data.channel,
-          text: data.text,
-        });
-      }
-    }
-  },
+  // Wire ack detection once — library clears in-flight automatically
+  getAckId: (msg) => (msg.type === "delivered" ? msg.ackId : undefined),
 
-  // When a message is confirmed, remove it from undelivered
-  onMessageReceived(msg) {
-    if (msg.action === "message") {
-      manager.ackInFlight(msg.id);
-      undelivered.removeMessage(msg.channel, msg.id);
-    }
-  },
-
-  // Retry undelivered messages after reconnecting
+  // Retry undelivered messages after every (re)connect
   onReady() {
     for (const channel of ["general", "random"]) {
       for (const msg of undelivered.getChannelMessages(channel)) {
         manager.send({
-          data: { action: "message", id: msg.id, channel, text: msg.text },
+          data: { type: "message", id: msg.id, channel, text: msg.text },
           ackId: msg.id,
         });
       }
@@ -185,11 +173,34 @@ const unsub = undelivered.subscribe(() => {
   },
 });
 
+// Mount once in your app shell. The bridge owns the React-side wiring.
+function UndeliveredBridge() {
+  // Save messages that were in-flight when the connection dropped
+  useSocketInFlightDrop(manager, (messages) => {
+    for (const { id, data } of messages) {
+      if (data.type === "message") {
+        undelivered.addMessage(data.channel, {
+          id,
+          channel: data.channel,
+          text: data.text,
+        });
+      }
+    }
+  });
+
+  // Remove from storage once the server confirms
+  useSocketEvent(manager, "delivered", (msg) => {
+    undelivered.removeMessage(msg.channel, msg.ackId);
+  });
+
+  return null;
+}
+
 // When sending, check the return value — if false, save immediately
 function sendMessage(channel: string, text: string) {
   const id = crypto.randomUUID();
   const sent = manager.send({
-    data: { action: "message", id, channel, text },
+    data: { type: "message", id, channel, text },
     ackId: id,
   });
   if (!sent) {

@@ -39,10 +39,12 @@ const refreshFlowSample = `const manager = new WebSocketManager<TClientMsg, TSer
   },
   serialize: (msg) => JSON.stringify(msg),
   deserialize: (raw) => JSON.parse(raw),
+});
 
-  onConnectionStateChange(state) {
-    // Optional: react to reconnect loops here
-  },
+// Optional: react to reconnect loops here.
+manager.subscribeToConnectionState(() => {
+  const state = manager.getConnectionState();
+  // ...
 });
 
 // Elsewhere: a server message tells you the token is dead

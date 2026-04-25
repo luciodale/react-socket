@@ -57,7 +57,9 @@ const reconnectSample = `it("schedules reconnect on abnormal close", async () =>
     deserialize: (r) => JSON.parse(r),
     reconnectBaseDelayMs: 10,
     reconnectMaxAttempts: 3,
-    onConnectionStateChange: (s) => states.push(s),
+  });
+  manager.subscribeToConnectionState(() => {
+    states.push(manager.getConnectionState());
   });
 
   manager.connect();
