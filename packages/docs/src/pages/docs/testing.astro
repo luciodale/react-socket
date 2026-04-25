@@ -90,10 +90,10 @@ const ackSample = `it("clears in-flight on ack from server", () => {
   transport.simulateOpen();
 
   manager.send({ data: { type: "send", text: "hi" }, ackId: "ack-1" });
-  expect(manager.getInFlightMessages().has("ack-1")).toBe(true);
+  expect(manager.getSnapshot().inFlightMessages.has("ack-1")).toBe(true);
 
   transport.simulateMessage(JSON.stringify({ type: "delivered", ackId: "ack-1" }));
-  expect(manager.getInFlightMessages().has("ack-1")).toBe(false);
+  expect(manager.getSnapshot().inFlightMessages.has("ack-1")).toBe(false);
 });`;
 
 const hookTestSample = `import { act, renderHook } from "@testing-library/react";

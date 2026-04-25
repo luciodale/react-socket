@@ -129,7 +129,7 @@ function handleSend(text: string) {
 		</p>
 		<CodeBlock
 			code={`onConnectionStateChange(state) {
-  if (state === "disconnected" && manager.getReconnectAttempt() >= MAX) {
+  if (state === "disconnected" && manager.getSnapshot().reconnectAttempt >= MAX) {
     notify({
       title: "Connection lost",
       action: { label: "Retry", onClick: () => manager.connect() },

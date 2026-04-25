@@ -54,20 +54,24 @@ function createManager(overrides?: {
 		reconnectMaxDelayMs: 100,
 		ping: overrides?.ping,
 		isPong: overrides?.isPong,
-		onConnectionStateChange: (state) => {
-			states.push(state);
-			overrides?.onConnectionStateChange?.(state);
-		},
 		onReady: () => {
 			readyCalls.push(1);
 			overrides?.onReady?.();
 		},
-		onInFlightDrop: (messages) => {
-			droppedInFlightMaps.push(messages);
-			overrides?.onInFlightDrop?.(messages);
-		},
-		onLastUnsubscribe: overrides?.onLastUnsubscribe,
 	});
+
+	manager.subscribeToConnectionState(() => {
+		const state = manager.getConnectionState();
+		states.push(state);
+		overrides?.onConnectionStateChange?.(state);
+	});
+	manager.addInFlightDropListener((messages) => {
+		droppedInFlightMaps.push(messages);
+		overrides?.onInFlightDrop?.(messages);
+	});
+	if (overrides?.onLastUnsubscribe) {
+		manager.addLastUnsubscribeListener(overrides.onLastUnsubscribe);
+	}
 
 	manager.addMessageListener((msg) => {
 		rawMessages.push(msg);
@@ -188,9 +192,7 @@ describe("WebSocketManager", () => {
 			transport.simulateOpen();
 
 			manager.subscribe("conversation:ch1", subMsg("conversation", "ch1"));
-			expect(manager.getPendingSubscriptions().has("conversation:ch1")).toBe(
-				true,
-			);
+			expect(manager.hasPendingSubscription("conversation:ch1")).toBe(true);
 		});
 
 		it("resolves pending subscription via resolvePendingSubscription", () => {
@@ -200,9 +202,7 @@ describe("WebSocketManager", () => {
 
 			manager.subscribe("conversation:ch1", subMsg("conversation", "ch1"));
 			manager.resolvePendingSubscription("conversation:ch1");
-			expect(manager.getPendingSubscriptions().has("conversation:ch1")).toBe(
-				false,
-			);
+			expect(manager.hasPendingSubscription("conversation:ch1")).toBe(false);
 		});
 	});
 
@@ -368,7 +368,7 @@ describe("WebSocketManager", () => {
 		});
 	});
 
-	describe("onSendIntent", () => {
+	describe("send intent listener", () => {
 		it("fires on every send() call with data and ackId", () => {
 			const intents: { data: TTestClientMsg; ackId?: string }[] = [];
 			const transport = new MockTransport();
@@ -376,9 +376,9 @@ describe("WebSocketManager", () => {
 				...testSerialization,
 				url: "ws://test",
 				transport,
-				onSendIntent({ data, ackId }) {
-					intents.push({ data, ackId });
-				},
+			});
+			manager.addSendIntentListener(({ data, ackId }) => {
+				intents.push({ data, ackId });
 			});
 			manager.connect();
 			transport.simulateOpen();
@@ -404,9 +404,9 @@ describe("WebSocketManager", () => {
 				...testSerialization,
 				url: "ws://test",
 				transport,
-				onSendIntent({ data, ackId }) {
-					intents.push({ data, ackId });
-				},
+			});
+			manager.addSendIntentListener(({ data, ackId }) => {
+				intents.push({ data, ackId });
 			});
 			// Not connected — send() will return false
 			const result = manager.send({
@@ -559,7 +559,7 @@ describe("WebSocketManager", () => {
 		});
 	});
 
-	describe("addProtocols", () => {
+	describe("setProtocols", () => {
 		it("passes protocols when set before connect", () => {
 			const transport = new MockTransport();
 			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
@@ -567,7 +567,7 @@ describe("WebSocketManager", () => {
 				url: "ws://test",
 				transport,
 			});
-			manager.addProtocols(["access_token", "my-token"]);
+			manager.setProtocols(["access_token", "my-token"]);
 			manager.connect();
 			expect(transport.connectCalls[0].protocols).toEqual([
 				"access_token",
@@ -575,7 +575,7 @@ describe("WebSocketManager", () => {
 			]);
 		});
 
-		it("omits protocols when none added", () => {
+		it("omits protocols when none set", () => {
 			const transport = new MockTransport();
 			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
 				...testSerialization,
@@ -586,21 +586,30 @@ describe("WebSocketManager", () => {
 			expect(transport.connectCalls[0].protocols).toBeUndefined();
 		});
 
-		it("appends protocols across multiple calls", () => {
+		it("replaces previous protocols on each call", () => {
 			const transport = new MockTransport();
 			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
 				...testSerialization,
 				url: "ws://test",
 				transport,
 			});
-			manager.addProtocols(["access_token", "my-token"]);
-			manager.addProtocols(["extra"]);
+			manager.setProtocols(["access_token", "my-token"]);
+			manager.setProtocols(["replacement"]);
 			manager.connect();
-			expect(transport.connectCalls[0].protocols).toEqual([
-				"access_token",
-				"my-token",
-				"extra",
-			]);
+			expect(transport.connectCalls[0].protocols).toEqual(["replacement"]);
+		});
+
+		it("clears protocols when called with an empty array", () => {
+			const transport = new MockTransport();
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+			});
+			manager.setProtocols(["initial"]);
+			manager.setProtocols([]);
+			manager.connect();
+			expect(transport.connectCalls[0].protocols).toBeUndefined();
 		});
 	});
 

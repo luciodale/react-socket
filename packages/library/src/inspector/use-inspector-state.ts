@@ -9,19 +9,24 @@ import type {
 	TSnapshot,
 } from "./inspector-types";
 
-function cloneManagerState<TClientMsg, TServerMsg>(
-	manager: WebSocketManager<TClientMsg, TServerMsg>,
+function cloneManagerState<
+	TClientMsg,
+	TServerMsg extends Record<TKey, string>,
+	TKey extends string = "type",
+>(
+	manager: WebSocketManager<TClientMsg, TServerMsg, TKey>,
 ): TManagerState<TClientMsg> {
+	const s = manager.getSnapshot();
 	return {
-		connectionState: manager.getConnectionState(),
-		subscriptionRefCounts: new Map(manager.getSubscriptionRefCounts()),
-		subscriptionData: new Map(manager.getSubscriptionData()),
-		pendingSubscriptions: new Set(manager.getPendingSubscriptions()),
-		inFlightMessages: new Map(manager.getInFlightMessages()),
-		reconnectAttempt: manager.getReconnectAttempt(),
-		protocols: [...manager.getProtocols()],
-		disposed: manager.isDisposed(),
-		intentionalClose: manager.isIntentionalClose(),
+		connectionState: s.connectionState,
+		subscriptionRefCounts: new Map(s.subscriptionRefCounts),
+		subscriptionData: new Map(s.subscriptionData),
+		pendingSubscriptions: new Set(s.pendingSubscriptions),
+		inFlightMessages: new Map(s.inFlightMessages),
+		reconnectAttempt: s.reconnectAttempt,
+		protocols: [...s.protocols],
+		disposed: s.disposed,
+		intentionalClose: s.intentionalClose,
 	};
 }
 
@@ -35,10 +40,11 @@ function createInitialState<TClientMsg, TServerMsg>(
 	};
 }
 
-export function useInspectorState<TClientMsg, TServerMsg>(
-	manager: WebSocketManager<TClientMsg, TServerMsg>,
-	maxSnapshots = 500,
-) {
+export function useInspectorState<
+	TClientMsg,
+	TServerMsg extends Record<TKey, string>,
+	TKey extends string = "type",
+>(manager: WebSocketManager<TClientMsg, TServerMsg, TKey>, maxSnapshots = 500) {
 	const [state, dispatch] = useReducer(
 		(
 			s: TInspectorState<TClientMsg, TServerMsg>,

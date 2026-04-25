@@ -306,19 +306,17 @@ manager.addMessageListener(listener);         // returns unsubscribe
 manager.subscribe(key, data);
 manager.unsubscribe(key, data);
 manager.getRefCount(key);
-manager.getSubscriptionRefCounts();
-manager.getSubscriptionData();
-manager.getPendingSubscriptions();
 manager.hasPendingSubscription(key);
 manager.subscribeToPendingSubscriptions(listener); // returns unsubscribe
 
 // Send
-manager.send({ data, ackId?, meta? });
-manager.getInFlightMessages();
+manager.send({ data, ackId? });
 
-// Protocols
-manager.addProtocols(["graphql-ws"]);
-manager.getProtocols();
+// Protocols (replace, not append)
+manager.setProtocols(["graphql-ws"]);
+
+// Snapshot (for Inspector or tests)
+manager.getSnapshot();
 
 // Debug
 manager.addDebugListener(listener);`}

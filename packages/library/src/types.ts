@@ -60,11 +60,12 @@ export type TManagerConfig<
 	isPong?: (msg: TServerMsg) => boolean;
 	getAckId?: (msg: TServerMsg) => string | undefined;
 	getSubscriptionResolvedKey?: (msg: TServerMsg) => string | undefined;
-	onSendIntent?: (params: TSendParams<TClientMsg>) => void;
-	onConnectionStateChange?: (state: TConnectionState) => void;
+	// Construction-time callbacks. The other lifecycle events
+	// (send-intent, connection-state-change, in-flight-drop, last-unsubscribe)
+	// are exposed through `addXxxListener` methods on the manager. Wire those
+	// from your React tree (or a top-level bridge) so they have a clear
+	// teardown story.
 	onReady?: (restoredKeys: string[]) => void;
-	onInFlightDrop?: (messages: { id: string; data: TClientMsg }[]) => void;
-	onLastUnsubscribe?: (key: string, data: TClientMsg | undefined) => void;
 	onDebug?: (event: TDebugEvent<TClientMsg, TServerMsg>) => void;
 };
 
@@ -73,7 +74,25 @@ export type TManagerConfig<
 export type TSendParams<TClientMsg> = {
 	data: TClientMsg;
 	ackId?: string;
-	meta?: unknown;
+};
+
+// ── Manager snapshot ────────────────────────────────────────────────
+
+/**
+ * Frozen view of the manager's internal state. Returned by
+ * `manager.getSnapshot()`. Useful for the Inspector and for tests that
+ * need to assert across multiple internal collections in one read.
+ */
+export type TManagerSnapshot<TClientMsg> = {
+	connectionState: TConnectionState;
+	subscriptionRefCounts: ReadonlyMap<string, number>;
+	subscriptionData: ReadonlyMap<string, TClientMsg | undefined>;
+	pendingSubscriptions: ReadonlySet<string>;
+	inFlightMessages: ReadonlyMap<string, TClientMsg>;
+	reconnectAttempt: number;
+	protocols: readonly string[];
+	disposed: boolean;
+	intentionalClose: boolean;
 };
 
 // ── Debug events ───────────────────────────────────────────────────

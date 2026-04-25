@@ -172,12 +172,14 @@ function createConnectedManager(
 		reconnectBaseDelayMs: 10,
 		reconnectMaxAttempts: 3,
 		reconnectMaxDelayMs: 100,
-		onMessageReceived(msg) {
-			onMessage(msg, useStore);
-		},
-		onInFlightDrop(messages) {
-			onInFlightDrop(messages, useStore);
-		},
+	});
+
+	manager.addInFlightDropListener((messages) => {
+		onInFlightDrop(messages, useStore);
+	});
+
+	manager.addMessageListener((msg) => {
+		onMessage(msg, useStore);
 	});
 
 	manager.connect();
@@ -195,7 +197,7 @@ beforeEach(() => {
 	useStore = t.useStore;
 });
 
-describe("store via onMessageReceived callback", () => {
+describe("store via addMessageListener", () => {
 	describe("event delivery", () => {
 		it("appends event to channel", () => {
 			const { transport } = createConnectedManager(useStore);

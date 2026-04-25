@@ -6,7 +6,7 @@ import { MockTransport } from "../helpers/mock-transport";
 // ── Test types ──────────────────────────────────────────────────────
 
 type TTestClientMsg = Record<string, unknown>;
-type TTestServerMsg = Record<string, unknown>;
+type TTestServerMsg = { type: string } & Record<string, unknown>;
 
 const testSerialization = {
 	serialize: (msg: TTestClientMsg) => JSON.stringify(msg),
@@ -27,7 +27,7 @@ function createManager(overrides?: {
 	transport?: MockTransport;
 	onMessageReceived?: (msg: TTestServerMsg) => void;
 	onDebug?: (event: TDebugEvent<TTestClientMsg, TTestServerMsg>) => void;
-	ping?: TTestClientMsg;
+	ping?: () => TTestClientMsg;
 	isPong?: (msg: TTestServerMsg) => boolean;
 	pingIntervalMs?: number;
 	pongTimeoutMs?: number;
@@ -48,12 +48,15 @@ function createManager(overrides?: {
 		reconnectMaxDelayMs: 100,
 		ping: overrides?.ping,
 		isPong: overrides?.isPong,
-		onMessageReceived: overrides?.onMessageReceived,
 		onDebug: (event) => {
 			events.push(event);
 			overrides?.onDebug?.(event);
 		},
 	});
+
+	if (overrides?.onMessageReceived) {
+		manager.addMessageListener(overrides.onMessageReceived);
+	}
 
 	return { manager, transport, events };
 }
@@ -526,7 +529,7 @@ describe("WebSocketManager debug events", () => {
 			manager.dispose();
 
 			// if we get here without throwing, the test passes
-			expect(manager.isDisposed()).toBe(true);
+			expect(manager.getSnapshot().disposed).toBe(true);
 		});
 
 		it("starts emitting when listener is added later", () => {

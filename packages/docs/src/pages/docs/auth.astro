@@ -265,7 +265,7 @@ useSocketEvent(manager, "unauthorized", async () => {
 	<ContentSection label="Subprotocol authentication">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			Some servers accept a token through the WebSocket subprotocol header. Use
-			<InlineCode>manager.addProtocols()</InlineCode> before calling <InlineCode>connect()</InlineCode>:
+			<InlineCode>manager.setProtocols()</InlineCode> before calling <InlineCode>connect()</InlineCode>:
 		</p>
 		<CodeBlock
 			code={`const manager = new WebSocketManager<TClientMsg, TServerMsg>({
@@ -274,7 +274,7 @@ useSocketEvent(manager, "unauthorized", async () => {
   deserialize: (raw) => JSON.parse(raw),
 });
 
-manager.addProtocols(["bearer", token]);
+manager.setProtocols(["bearer", token]);
 manager.connect();`}
 			language="tsx"
 			filename="manager.ts"

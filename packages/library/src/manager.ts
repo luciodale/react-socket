@@ -13,6 +13,7 @@ import type {
 	TDebugEventPayload,
 	TIncomingData,
 	TManagerConfig,
+	TManagerSnapshot,
 	TSendParams,
 	TWireData,
 } from "./types";
@@ -46,31 +47,11 @@ export class WebSocketManager<
 		| ((msg: TServerMsg) => string | undefined)
 		| undefined;
 
-	private readonly onSendIntentCb: TManagerConfig<
-		TClientMsg,
-		TServerMsg,
-		TKey
-	>["onSendIntent"];
-	private readonly onConnectionStateChange: TManagerConfig<
-		TClientMsg,
-		TServerMsg,
-		TKey
-	>["onConnectionStateChange"];
 	private readonly onReady: TManagerConfig<
 		TClientMsg,
 		TServerMsg,
 		TKey
 	>["onReady"];
-	private readonly onInFlightDrop: TManagerConfig<
-		TClientMsg,
-		TServerMsg,
-		TKey
-	>["onInFlightDrop"];
-	private readonly onLastUnsubscribe: TManagerConfig<
-		TClientMsg,
-		TServerMsg,
-		TKey
-	>["onLastUnsubscribe"];
 	private readonly onDebugCb: TManagerConfig<
 		TClientMsg,
 		TServerMsg,
@@ -139,11 +120,7 @@ export class WebSocketManager<
 		this.isPong = config.isPong;
 		this.getAckIdCb = config.getAckId;
 		this.getSubscriptionResolvedKeyCb = config.getSubscriptionResolvedKey;
-		this.onSendIntentCb = config.onSendIntent;
-		this.onConnectionStateChange = config.onConnectionStateChange;
 		this.onReady = config.onReady;
-		this.onInFlightDrop = config.onInFlightDrop;
-		this.onLastUnsubscribe = config.onLastUnsubscribe;
 		this.onDebugCb = config.onDebug;
 
 		this.handleOnline = this.handleOnline.bind(this);
@@ -221,22 +198,8 @@ export class WebSocketManager<
 	forceReconnect(): void {
 		if (this.disposed) return;
 		this.clearTimers();
-		this.notifyPendingSubscriptionsCleared();
-		this.pendingSubscriptions.clear();
-
-		if (this.inFlightMessages.size > 0) {
-			const messages = Array.from(this.inFlightMessages, ([id, data]) => ({
-				id,
-				data,
-			}));
-			this.onInFlightDrop?.(messages);
-			for (const listener of this.inFlightDropListeners) listener(messages);
-			this.emitDebug({
-				type: "in-flight-drop",
-				ids: messages.map((m) => m.id),
-			});
-			this.inFlightMessages.clear();
-		}
+		this.clearPendingSubscriptions();
+		this.dropInFlight();
 
 		// Detach old handlers to prevent stale close events from interfering
 		this.transport.onclose = null;
@@ -259,8 +222,7 @@ export class WebSocketManager<
 		this.disconnect();
 		this.subscriptionRefCounts.clear();
 		this.subscriptionData.clear();
-		this.notifyPendingSubscriptionsCleared();
-		this.pendingSubscriptions.clear();
+		this.clearPendingSubscriptions();
 		this.inFlightMessages.clear();
 		this.emitDebug({ type: "dispose" });
 	}
@@ -296,11 +258,12 @@ export class WebSocketManager<
 			this.subscriptionRefCounts.delete(key);
 			this.subscriptionData.delete(key);
 			const hadPending = this.pendingSubscriptions.delete(key);
-			if (hadPending) this.notifyPendingSubscriptionListeners();
+			if (hadPending) {
+				for (const listener of this.pendingSubscriptionListeners) listener();
+			}
 			if (data && this.connectionState === "connected") {
 				this.rawSend(this.serialize(data));
 			}
-			this.onLastUnsubscribe?.(key, storedData);
 			for (const listener of this.lastUnsubscribeListeners) {
 				listener(key, storedData);
 			}
@@ -320,10 +283,6 @@ export class WebSocketManager<
 
 	getRefCount(key: string): number {
 		return this.subscriptionRefCounts.get(key) ?? 0;
-	}
-
-	getPendingSubscriptions(): ReadonlySet<string> {
-		return this.pendingSubscriptions;
 	}
 
 	hasPendingSubscription(key: string): boolean {
@@ -351,14 +310,15 @@ export class WebSocketManager<
 
 	resolvePendingSubscription(key: string): void {
 		const hadPending = this.pendingSubscriptions.delete(key);
-		if (hadPending) this.notifyPendingSubscriptionListeners();
+		if (hadPending) {
+			for (const listener of this.pendingSubscriptionListeners) listener();
+		}
 		this.emitDebug({ type: "pending-subscription-resolved", key });
 	}
 
 	// ── Sending ───────────────────────────────────────────────────────
 
 	send(params: TSendParams<TClientMsg>): boolean {
-		this.onSendIntentCb?.(params);
 		for (const listener of this.sendIntentListeners) listener(params);
 		if (this.connectionState !== "connected") return false;
 		const serialized = this.serialize(params.data);
@@ -444,34 +404,27 @@ export class WebSocketManager<
 		};
 	}
 
-	// ── Read-only getters ─────────────────────────────────────────────
+	// ── Snapshot ──────────────────────────────────────────────────────
 
-	getSubscriptionRefCounts(): ReadonlyMap<string, number> {
-		return this.subscriptionRefCounts;
-	}
-
-	getSubscriptionData(): ReadonlyMap<string, TClientMsg | undefined> {
-		return this.subscriptionData;
-	}
-
-	getInFlightMessages(): ReadonlyMap<string, TClientMsg> {
-		return this.inFlightMessages;
-	}
-
-	getReconnectAttempt(): number {
-		return this.reconnectAttempt;
-	}
-
-	getProtocols(): readonly string[] {
-		return this.protocols;
-	}
-
-	isDisposed(): boolean {
-		return this.disposed;
-	}
-
-	isIntentionalClose(): boolean {
-		return this.intentionalClose;
+	/**
+	 * Returns a single-read view of the manager's internal state. Use this
+	 * for the Inspector or for tests that need to assert across multiple
+	 * collections without juggling separate accessors. The returned Maps and
+	 * Set are typed Readonly but reference the live internal collections;
+	 * clone them before retaining.
+	 */
+	getSnapshot(): TManagerSnapshot<TClientMsg> {
+		return {
+			connectionState: this.connectionState,
+			subscriptionRefCounts: this.subscriptionRefCounts,
+			subscriptionData: this.subscriptionData,
+			pendingSubscriptions: this.pendingSubscriptions,
+			inFlightMessages: this.inFlightMessages,
+			reconnectAttempt: this.reconnectAttempt,
+			protocols: this.protocols,
+			disposed: this.disposed,
+			intentionalClose: this.intentionalClose,
+		};
 	}
 
 	// ── Private: handlers ─────────────────────────────────────────────
@@ -488,22 +441,8 @@ export class WebSocketManager<
 
 	private handleClose(event: CloseEvent): void {
 		this.clearTimers();
-		this.notifyPendingSubscriptionsCleared();
-		this.pendingSubscriptions.clear();
-
-		if (this.inFlightMessages.size > 0) {
-			const messages = Array.from(this.inFlightMessages, ([id, data]) => ({
-				id,
-				data,
-			}));
-			this.onInFlightDrop?.(messages);
-			for (const listener of this.inFlightDropListeners) listener(messages);
-			this.emitDebug({
-				type: "in-flight-drop",
-				ids: messages.map((m) => m.id),
-			});
-			this.inFlightMessages.clear();
-		}
+		this.clearPendingSubscriptions();
+		this.dropInFlight();
 
 		if (this.intentionalClose || this.disposed) {
 			this.setConnectionState("disconnected");
@@ -570,7 +509,12 @@ export class WebSocketManager<
 
 	private handleOffline(): void {
 		this.clearTimers();
+		// Detach all transport handlers so a stale ws cannot fire close /
+		// open / message / error after we have moved on.
 		this.transport.onclose = null;
+		this.transport.onopen = null;
+		this.transport.onmessage = null;
+		this.transport.onerror = null;
 		this.transport.disconnect(4000, "offline");
 		this.setConnectionState("reconnecting");
 	}
@@ -664,7 +608,9 @@ export class WebSocketManager<
 		const data = this.subscriptionData.get(key);
 		const added = !this.pendingSubscriptions.has(key);
 		this.pendingSubscriptions.add(key);
-		if (added) this.notifyPendingSubscriptionListeners();
+		if (added) {
+			for (const listener of this.pendingSubscriptionListeners) listener();
+		}
 		if (data) {
 			this.rawSend(this.serialize(data));
 		}
@@ -674,20 +620,30 @@ export class WebSocketManager<
 		if (this.connectionState === state) return;
 		const from = this.connectionState;
 		this.connectionState = state;
-		this.onConnectionStateChange?.(state);
 		for (const listener of this.connectionStateListeners) {
 			listener();
 		}
 		this.emitDebug({ type: "connection-state-change", from, to: state });
 	}
 
-	private notifyPendingSubscriptionListeners(): void {
+	private clearPendingSubscriptions(): void {
+		if (this.pendingSubscriptions.size === 0) return;
+		this.pendingSubscriptions.clear();
 		for (const listener of this.pendingSubscriptionListeners) listener();
 	}
 
-	private notifyPendingSubscriptionsCleared(): void {
-		if (this.pendingSubscriptions.size === 0) return;
-		this.notifyPendingSubscriptionListeners();
+	private dropInFlight(): void {
+		if (this.inFlightMessages.size === 0) return;
+		const messages = Array.from(this.inFlightMessages, ([id, data]) => ({
+			id,
+			data,
+		}));
+		this.inFlightMessages.clear();
+		for (const listener of this.inFlightDropListeners) listener(messages);
+		this.emitDebug({
+			type: "in-flight-drop",
+			ids: messages.map((m) => m.id),
+		});
 	}
 
 	private emitDebug(payload: TDebugEventPayload<TClientMsg, TServerMsg>): void {
@@ -715,8 +671,12 @@ export class WebSocketManager<
 		}
 	}
 
-	addProtocols(protocols: string[]): void {
-		this.protocols = [...this.protocols, ...protocols];
+	/**
+	 * Replace the WebSocket subprotocols offered on the next connect.
+	 * Pass an empty array to drop them.
+	 */
+	setProtocols(protocols: readonly string[]): void {
+		this.protocols = [...protocols];
 	}
 
 	private removeWindowListeners(): void {

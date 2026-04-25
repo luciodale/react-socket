@@ -21,6 +21,7 @@ export type {
 	TDebugEventType,
 	TIncomingData,
 	TManagerConfig,
+	TManagerSnapshot,
 	TSendParams,
 	TWireData,
 } from "./types";
