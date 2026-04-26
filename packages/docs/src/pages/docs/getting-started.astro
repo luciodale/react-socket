@@ -95,7 +95,7 @@ type TClientMsg = { type: "echo"; text: string };
 type TServerMsg = { type: "echo"; text: string };
 
 const manager = new WebSocketManager<TClientMsg, TServerMsg>({
-  url: "ws://localhost:3001/ws",
+  url: "wss://your-server.com/ws",
   serialize: (msg) => JSON.stringify(msg),
   deserialize: (raw) => JSON.parse(raw),
 });
@@ -162,8 +162,9 @@ useSocketInFlightDrop(manager, (messages) => { ... });
 // Fires after (re)connect once subs are restored
 useSocketReady(manager, (restoredKeys) => { ... });
 
-// Fires when the last subscriber for a key unsubscribes
-useSocketLastUnsubscribe(manager, (key, data) => { ... });
+// Fires when the last subscriber for a key unsubscribes —
+// 2nd arg is the original subscribe payload (first-payload wins)
+useSocketLastUnsubscribe(manager, (key, subscribePayload) => { ... });
 
 // Observable connection state
 const state = useSocketConnectionState(manager);`}
@@ -236,7 +237,7 @@ const state = useSocketConnectionState(manager);`}
 				<InlineCode>addInFlightDropListener</InlineCode>,
 				<InlineCode>addReadyListener</InlineCode>,
 				<InlineCode>addLastUnsubscribeListener</InlineCode>,
-				<InlineCode>subscribeToConnectionState</InlineCode>) — same payloads, returned from the manager. Use from workers, node scripts, tests, or non React consumers. Each returns an unsubscribe fn.
+				<InlineCode>addConnectionStateListener</InlineCode>) — same payloads, returned from the manager. Use from workers, node scripts, tests, or non React consumers. Each returns an unsubscribe fn.
 			</li>
 			<li>
 				<strong class="text-white/80">Construction-time callbacks</strong>

@@ -38,10 +38,15 @@ export const siteConfig: SiteConfig = {
 				{ href: "/docs/auth", label: "Authentication" },
 				{ href: "/docs/error-handling", label: "Error handling" },
 				{ href: "/docs/testing", label: "Testing" },
-				{ href: "/docs/binary", label: "Binary frames" },
-				{ href: "/docs/backpressure", label: "Backpressure" },
-				{ href: "/docs/monitoring", label: "Monitoring" },
 				{ href: "/docs/undelivered-sync", label: "Undelivered Sync" },
+			],
+		},
+		{
+			title: "Advanced",
+			links: [
+				{ href: "/docs/backpressure", label: "Backpressure" },
+				{ href: "/docs/binary", label: "Binary frames" },
+				{ href: "/docs/monitoring", label: "Monitoring" },
 			],
 		},
 		{

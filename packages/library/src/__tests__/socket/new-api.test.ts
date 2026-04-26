@@ -122,13 +122,13 @@ describe("auto resolve via getSubscriptionResolvedKey", () => {
 });
 
 describe("pending subscription observability", () => {
-	it("subscribeToPendingSubscriptions fires on add and resolve", () => {
+	it("addPendingSubscriptionListener fires on add and resolve", () => {
 		const { manager, transport } = createManager({
 			getSubscriptionResolvedKey: (m) =>
 				m.type === "subscribe-ack" ? m.key : undefined,
 		});
 		const snapshots: boolean[] = [];
-		manager.subscribeToPendingSubscriptions(() => {
+		manager.addPendingSubscriptionListener(() => {
 			snapshots.push(manager.hasPendingSubscription("room:1"));
 		});
 

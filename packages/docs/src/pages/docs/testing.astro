@@ -36,7 +36,8 @@ describe("greeting flow", () => {
     transport.simulateOpen();
 
     manager.send({ data: { type: "hello", name: "world" } });
-    expect(transport.lastSentParsed<TClientMsg>()).toEqual({
+    const last = transport.sentMessages.at(-1);
+    expect(typeof last === "string" ? JSON.parse(last) : last).toEqual({
       type: "hello",
       name: "world",
     });
@@ -58,7 +59,7 @@ const reconnectSample = `it("schedules reconnect on abnormal close", async () =>
     reconnectBaseDelayMs: 10,
     reconnectMaxAttempts: 3,
   });
-  manager.subscribeToConnectionState(() => {
+  manager.addConnectionStateListener(() => {
     states.push(manager.getConnectionState());
   });
 
@@ -219,8 +220,17 @@ export default defineConfig({
 			<li><InlineCode>simulateMessage(data)</InlineCode> — delivers a server frame</li>
 			<li><InlineCode>simulateError()</InlineCode> — fires the error handler</li>
 			<li><InlineCode>reset()</InlineCode> — wipes captured calls; listeners stay attached</li>
-			<li><InlineCode>lastSentParsed&lt;T&gt;()</InlineCode> — JSON-parses the most recent send</li>
 		</ul>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			Need the last sent payload as JSON? It is just a one-liner against
+			<InlineCode>sentMessages</InlineCode>:
+		</p>
+		<CodeBlock
+			code={`const last = transport.sentMessages.at(-1);
+const parsed = typeof last === "string" ? JSON.parse(last) : null;`}
+			language="ts"
+			filename="parse-last.ts"
+		/>
 	</ContentSection>
 
 	<ContentSection label="Next steps">

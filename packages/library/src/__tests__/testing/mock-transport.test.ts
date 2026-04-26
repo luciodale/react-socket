@@ -115,17 +115,4 @@ describe("MockTransport", () => {
 		transport.simulateOpen();
 		expect(openFired).toBe(2);
 	});
-
-	it("lastSentParsed parses and returns the last payload", () => {
-		const transport = new MockTransport();
-		transport.send(JSON.stringify({ type: "first" }));
-		transport.send(JSON.stringify({ type: "second", n: 1 }));
-		const last = transport.lastSentParsed<{ type: string; n: number }>();
-		expect(last).toEqual({ type: "second", n: 1 });
-	});
-
-	it("lastSentParsed throws when nothing has been sent", () => {
-		const transport = new MockTransport();
-		expect(() => transport.lastSentParsed()).toThrow(/no messages/);
-	});
 });

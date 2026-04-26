@@ -4,7 +4,7 @@ import type { TConnectionState, TSendParams } from "./types";
 // ── useSocketConnectionState ─────────────────────────────────────────
 
 type TConnectionStateSource = {
-	subscribeToConnectionState: (listener: () => void) => () => void;
+	addConnectionStateListener: (listener: () => void) => () => void;
 	getConnectionState: () => TConnectionState;
 };
 
@@ -12,7 +12,7 @@ export function useSocketConnectionState(
 	manager: TConnectionStateSource,
 ): TConnectionState {
 	return useSyncExternalStore(
-		(listener) => manager.subscribeToConnectionState(listener),
+		(listener) => manager.addConnectionStateListener(listener),
 		() => manager.getConnectionState(),
 		() => manager.getConnectionState(),
 	);
@@ -20,9 +20,11 @@ export function useSocketConnectionState(
 
 // ── useSocketEvent ───────────────────────────────────────────────────
 
-type TMessageSource<TServerMsg, TKey extends string> = {
-	discriminator: TKey;
-	addMessageListener: (cb: (msg: TServerMsg) => void) => () => void;
+type TKeyedEventSource<TServerMsg> = {
+	addEventListener: (
+		value: string,
+		cb: (msg: TServerMsg) => void,
+	) => () => void;
 };
 
 export function useSocketEvent<
@@ -30,7 +32,7 @@ export function useSocketEvent<
 	TServerMsg extends Record<TKey, string>,
 	TValue extends TServerMsg[TKey],
 >(
-	manager: TMessageSource<TServerMsg, TKey>,
+	manager: TKeyedEventSource<TServerMsg>,
 	value: TValue,
 	handler: (msg: Extract<TServerMsg, Record<TKey, TValue>>) => void,
 ): void {
@@ -38,11 +40,8 @@ export function useSocketEvent<
 	handlerRef.current = handler;
 
 	useEffect(() => {
-		const key = manager.discriminator;
-		return manager.addMessageListener((msg) => {
-			if ((msg as Record<TKey, string>)[key] === value) {
-				handlerRef.current(msg as Extract<TServerMsg, Record<TKey, TValue>>);
-			}
+		return manager.addEventListener(value, (msg) => {
+			handlerRef.current(msg as Extract<TServerMsg, Record<TKey, TValue>>);
 		});
 	}, [manager, value]);
 }
@@ -74,7 +73,7 @@ export function useSocketEventBatch<
 	TServerMsg extends Record<TKey, string>,
 	TValue extends TServerMsg[TKey],
 >(
-	manager: TMessageSource<TServerMsg, TKey>,
+	manager: TKeyedEventSource<TServerMsg>,
 	value: TValue,
 	handler: (msgs: Array<Extract<TServerMsg, Record<TKey, TValue>>>) => void,
 	options: { flushMs: number; idleMs?: number },
@@ -85,7 +84,6 @@ export function useSocketEventBatch<
 	const { flushMs, idleMs } = options;
 
 	useEffect(() => {
-		const key = manager.discriminator;
 		const buffer: Array<Extract<TServerMsg, Record<TKey, TValue>>> = [];
 		let idleTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -101,13 +99,11 @@ export function useSocketEventBatch<
 			handlerRef.current(batch);
 		};
 
-		const unsubscribe = manager.addMessageListener((msg) => {
-			if ((msg as Record<TKey, string>)[key] === value) {
-				buffer.push(msg as Extract<TServerMsg, Record<TKey, TValue>>);
-				if (idleMs !== undefined) {
-					if (idleTimer) clearTimeout(idleTimer);
-					idleTimer = setTimeout(flush, idleMs);
-				}
+		const unsubscribe = manager.addEventListener(value, (msg) => {
+			buffer.push(msg as Extract<TServerMsg, Record<TKey, TValue>>);
+			if (idleMs !== undefined) {
+				if (idleTimer) clearTimeout(idleTimer);
+				idleTimer = setTimeout(flush, idleMs);
 			}
 		});
 
@@ -146,19 +142,26 @@ type TSubscribable<TClientMsg> = {
  * (no wire send, no ref-count touch). Flipping `false → true` subscribes;
  * `true → false` unsubscribes. Mirrors React Query's `enabled` semantics.
  *
- * **Payload is captured at subscription time, not reactive.** `subscribe`
- * and `unsubscribe` payloads are read when the effect runs (mount, key
- * change, or `enabled` flip). Mutating them mid-life does NOT re-send.
- * To update the server with new state, send a separate message via
- * `useSocketSend`, or change `key` to force a resubscribe.
+ * **Payload timing.** The `subscribe` payload is read once, when the
+ * effect runs (mount, key change, or `enabled` flip), and stored for
+ * replay on reconnect. Changing it between renders without changing
+ * `key`/`enabled` does NOT re-send. The `unsubscribe` payload is read at
+ * unmount time (latest ref), so updates between mount and unmount are
+ * picked up. To push a new subscribe payload, change `key` or toggle
+ * `enabled`.
  *
  * **First-payload wins.** When multiple components subscribe to the same
  * `key`, only the first payload is sent on the wire and stored for replay
- * on reconnect. Later subscribers only bump the ref count. If two call
- * sites disagree on the payload, the disagreement is silent — wrap in a
- * custom hook to make it impossible. If your protocol needs each joiner
- * to identify itself, send a separate `useSocketSend` message instead of
- * relying on the subscribe payload.
+ * on reconnect. Later subscribers only bump the ref count. Combining
+ * `enabled: false → true` with an existing subscription on the same key
+ * means the late joiner's payload never reaches the wire. Wrap in a
+ * custom hook so two call sites cannot drift apart. If your protocol
+ * needs each joiner to identify itself, send a separate `useSocketSend`
+ * message instead of relying on the subscribe payload.
+ *
+ * **Subscribe with no payload** is supported (bookkeeping-only ref count,
+ * no wire send). `useSocketPendingSubscription` will not flip to `true`
+ * for those keys since there is nothing to ack.
  *
  * @example
  * ```tsx
@@ -200,7 +203,7 @@ export function useSocketSubscription<TClientMsg>(
 // ── useSocketPendingSubscription ─────────────────────────────────────
 
 type TPendingSubscriptionSource = {
-	subscribeToPendingSubscriptions: (listener: () => void) => () => void;
+	addPendingSubscriptionListener: (listener: () => void) => () => void;
 	hasPendingSubscription: (key: string) => boolean;
 };
 
@@ -209,7 +212,7 @@ export function useSocketPendingSubscription(
 	key: string,
 ): boolean {
 	const subscribe = useCallback(
-		(listener: () => void) => manager.subscribeToPendingSubscriptions(listener),
+		(listener: () => void) => manager.addPendingSubscriptionListener(listener),
 		[manager],
 	);
 	const getSnapshot = useCallback(
@@ -323,7 +326,8 @@ type TReadySource = {
 /**
  * Fires every time the socket transitions to `connected` AND existing
  * subscriptions have been replayed to the server. Receives the list of
- * resubscribed keys. Use this to flush queued offline sends or to
+ * resubscribed keys. Also fires on the very first connect, with
+ * `restoredKeys = []`. Use this to flush queued offline sends or to
  * refetch state that may have drifted during the disconnect.
  *
  * @example
@@ -349,7 +353,7 @@ export function useSocketReady(
 
 type TLastUnsubscribeSource<TClientMsg> = {
 	addLastUnsubscribeListener: (
-		cb: (key: string, data: TClientMsg | undefined) => void,
+		cb: (key: string, subscribePayload: TClientMsg | undefined) => void,
 	) => () => void;
 };
 
@@ -358,6 +362,11 @@ type TLastUnsubscribeSource<TClientMsg> = {
  * last subscriber left and the wire `unsubscribe` was sent. Use it to
  * clear cached server state for the key, or to fire app-level cleanup
  * tied to "no one is watching this channel anymore."
+ *
+ * The second arg is the **original `subscribe` payload** that was stored
+ * when the first subscriber for this key joined (first-payload wins),
+ * not the unsubscribe payload. Useful for cache eviction code that needs
+ * to recover the join context.
  *
  * **Strict Mode**: React 18+ Strict Mode double-mounts components in
  * dev, causing a transient mount→unmount→remount cycle that fires this
@@ -374,13 +383,13 @@ type TLastUnsubscribeSource<TClientMsg> = {
  */
 export function useSocketLastUnsubscribe<TClientMsg>(
 	manager: TLastUnsubscribeSource<TClientMsg>,
-	handler: (key: string, data: TClientMsg | undefined) => void,
+	handler: (key: string, subscribePayload: TClientMsg | undefined) => void,
 ): void {
 	const handlerRef = useRef(handler);
 	handlerRef.current = handler;
 	useEffect(() => {
-		return manager.addLastUnsubscribeListener((key, data) =>
-			handlerRef.current(key, data),
+		return manager.addLastUnsubscribeListener((key, payload) =>
+			handlerRef.current(key, payload),
 		);
 	}, [manager]);
 }

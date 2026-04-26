@@ -10,6 +10,13 @@ export class BrowserWebSocketTransport implements IWebSocketTransport {
 	onmessage: ((event: MessageEvent) => void) | null = null;
 	onerror: ((event: Event) => void) | null = null;
 
+	/**
+	 * Mirrors `WebSocket.readyState` of the underlying socket. Returns
+	 * `WebSocket.CLOSED` when no socket has been created yet — callers
+	 * cannot distinguish "never connected" from "explicitly closed" off
+	 * this value alone; combine with the manager's connection state if
+	 * you need that distinction.
+	 */
 	get readyState(): number {
 		return this.ws?.readyState ?? WebSocket.CLOSED;
 	}

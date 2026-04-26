@@ -128,7 +128,7 @@ function handleSend(text: string) {
 			transition and offer a manual retry:
 		</p>
 		<CodeBlock
-			code={`manager.subscribeToConnectionState(() => {
+			code={`manager.addConnectionStateListener(() => {
   const state = manager.getConnectionState();
   if (state === "disconnected" && manager.getSnapshot().reconnectAttempt >= MAX) {
     notify({

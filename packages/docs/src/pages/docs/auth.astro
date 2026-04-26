@@ -42,7 +42,7 @@ const refreshFlowSample = `const manager = new WebSocketManager<TClientMsg, TSer
 });
 
 // Optional: react to reconnect loops here.
-manager.subscribeToConnectionState(() => {
+manager.addConnectionStateListener(() => {
   const state = manager.getConnectionState();
   // ...
 });

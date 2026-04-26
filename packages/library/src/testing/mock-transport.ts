@@ -106,25 +106,6 @@ export class MockTransport implements IWebSocketTransport {
 		this.disconnectCalls = [];
 		this.readyState = WebSocket.CLOSED;
 	}
-
-	/**
-	 * Convenience: parse and return the last `send()` payload as the given
-	 * generic type. Throws if nothing has been sent or the payload is not a
-	 * string (binary frames cannot be JSON-parsed; assert against
-	 * `sentMessages` directly in that case).
-	 */
-	lastSentParsed<T>(): T {
-		const last = this.sentMessages[this.sentMessages.length - 1];
-		if (last === undefined) {
-			throw new Error("MockTransport: no messages have been sent");
-		}
-		if (typeof last !== "string") {
-			throw new Error(
-				"MockTransport: lastSentParsed requires a string payload; got binary",
-			);
-		}
-		return JSON.parse(last) as T;
-	}
 }
 
 /** Factory for `MockTransport`. Equivalent to `new MockTransport()`. */

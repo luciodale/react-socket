@@ -94,10 +94,12 @@ manager.connect();
 // Graceful close (code 1000). Stops reconnection.
 manager.disconnect();
 
-// Tear down and reconnect from scratch.
+// Tear down and reconnect from scratch. Coalesced state transition:
+// connected → connecting (no transient "disconnected" frame).
 manager.forceReconnect();
 
-// Permanently shut down. Instance cannot be reused.
+// Permanently shut down. Calling connect() again throws — construct a
+// new manager instead.
 manager.dispose();`}
 			language="tsx"
 			filename="lifecycle.ts"
@@ -247,8 +249,9 @@ function onSubmit(text: string) {
 		<p class="text-white/60 mb-4 leading-relaxed">
 			Fires after every <InlineCode>connect</InlineCode> once subscriptions
 			are restored. The handler receives the list of keys that were replayed
-			to the server. Good place to refetch REST queries that may have missed
-			events during the disconnect.
+			to the server — also fires on the very first connect with
+			<InlineCode>restoredKeys = []</InlineCode>. Good place to refetch REST
+			queries that may have missed events during the disconnect.
 		</p>
 		<CodeBlock
 			code={`useSocketReady(manager, (restoredKeys) => {
@@ -265,11 +268,13 @@ function onSubmit(text: string) {
 	<ContentSection label="useSocketLastUnsubscribe">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			Fires when the ref count for a subscription key drops to zero.
-			Receives the key and the stored unsubscribe payload. Typical use is
-			store eviction for a channel that nobody is watching anymore.
+			Receives the key and the <strong>original subscribe payload</strong>
+			(first-payload wins) — useful when eviction logic needs the join
+			context. Typical use is store eviction for a channel that nobody is
+			watching anymore.
 		</p>
 		<CodeBlock
-			code={`useSocketLastUnsubscribe(manager, (key, data) => {
+			code={`useSocketLastUnsubscribe(manager, (key, subscribePayload) => {
   if (key.startsWith("room:")) {
     useChatStore.getState().evictRoom(key);
   }
@@ -312,17 +317,18 @@ function onSubmit(text: string) {
 		<CodeBlock
 			code={`// Connection
 manager.getConnectionState();
-manager.subscribeToConnectionState(listener); // returns unsubscribe
+manager.addConnectionStateListener(listener); // returns unsubscribe
 
 // Messages
-manager.addMessageListener(listener);         // returns unsubscribe
+manager.addMessageListener(listener);                 // firehose: every parsed frame
+manager.addEventListener(value, listener);            // O(1) keyed dispatch on the discriminator
 
 // Subscriptions
 manager.subscribe(key, data);
 manager.unsubscribe(key, data);
 manager.getRefCount(key);
 manager.hasPendingSubscription(key);
-manager.subscribeToPendingSubscriptions(listener); // returns unsubscribe
+manager.addPendingSubscriptionListener(listener);     // returns unsubscribe
 
 // Send
 manager.send({ data, ackId? });
@@ -346,6 +352,13 @@ const s = manager.getSnapshot();
 			language="tsx"
 			filename="manager-api.ts"
 		/>
+		<Callout type="tip" title="Keyed vs firehose">
+			<InlineCode>addEventListener</InlineCode> filters on the discriminator
+			before invoking your callback — O(1) per frame, regardless of how many
+			other types are listened to. Use it for per-type bridges. Reserve
+			<InlineCode>addMessageListener</InlineCode> for inspectors, loggers, and
+			catch-all consumers that genuinely need every frame.
+		</Callout>
 	</ContentSection>
 
 	<ContentSection label="Discriminator override">

@@ -90,6 +90,13 @@ export const prerender = true;
 			<InlineCode>"disconnected"</InlineCode> and no further retries are made.
 			Call <InlineCode>connect()</InlineCode> or <InlineCode>forceReconnect()</InlineCode> to try again manually.
 		</Callout>
+		<Callout type="info" title="reconnectAttempt is bookkeeping, not delivered count">
+			<InlineCode>manager.getSnapshot().reconnectAttempt</InlineCode>
+			increments after each retry is <em>scheduled</em>, not after each open.
+			After exhaustion it equals <InlineCode>reconnectMaxAttempts</InlineCode>.
+			Compare against the configured cap to detect "we gave up," not against
+			how many sockets actually opened.
+		</Callout>
 	</ContentSection>
 
 	<ContentSection label="Online / Offline Detection">
@@ -125,7 +132,10 @@ export const prerender = true;
 		<p class="text-white/60 mt-4 leading-relaxed">
 			This drops all in-flight messages, clears pending subscriptions, closes
 			the current connection, resets the attempt counter to zero, and immediately
-			calls <InlineCode>connect()</InlineCode>.
+			reopens the socket. The state goes
+			<InlineCode>connected → connecting</InlineCode> in a single transition —
+			there is no transient <InlineCode>"disconnected"</InlineCode> frame for
+			subscribers to flicker on.
 		</p>
 	</ContentSection>
 
@@ -135,7 +145,10 @@ export const prerender = true;
 			using the <InlineCode>subscribe</InlineCode> payload from the
 			<em>first</em> subscriber for that key (first-payload wins — see
 			<a href={href("/docs/subscriptions")} class="text-accent hover:underline">Subscriptions</a>).
-			Your components don't need to track or re-trigger anything.
+			Your components don't need to track or re-trigger anything. Restored
+			keys are sent back-to-back; if your app holds many subscriptions per
+			user, prefer a server-side multi-subscribe envelope or stagger the
+			restore yourself in <InlineCode>onReady</InlineCode>.
 		</p>
 		<p class="text-white/60 leading-relaxed">
 			The <InlineCode>onReady</InlineCode> callback fires after all

@@ -57,8 +57,10 @@ export type TManagerConfig<
 	 * Pause the ping/pong heartbeat while the document is hidden and resume
 	 * when it becomes visible again. Saves battery and avoids spurious pong
 	 * timeouts caused by background-tab throttling on mobile browsers.
-	 * Defaults to false (always heartbeat). Requires `ping`/`isPong` to be
-	 * configured to have any effect.
+	 * Defaults to `true`. Pass `false` if you need the heartbeat to keep
+	 * firing in background tabs (rare; usually a sign of a server-side
+	 * idle-timeout policy that should be tuned instead). Requires
+	 * `ping`/`isPong` to be configured to have any effect.
 	 */
 	pauseHeartbeatWhenHidden?: boolean;
 	/**

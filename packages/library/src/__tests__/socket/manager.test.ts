@@ -60,7 +60,7 @@ function createManager(overrides?: {
 		},
 	});
 
-	manager.subscribeToConnectionState(() => {
+	manager.addConnectionStateListener(() => {
 		const state = manager.getConnectionState();
 		states.push(state);
 		overrides?.onConnectionStateChange?.(state);
@@ -265,7 +265,7 @@ describe("WebSocketManager", () => {
 				reconnectMaxDelayMs: 50,
 				reconnectMaxAttempts: Number.POSITIVE_INFINITY,
 			});
-			manager.subscribeToConnectionState(() => {
+			manager.addConnectionStateListener(() => {
 				states.push(manager.getConnectionState());
 			});
 
@@ -376,7 +376,7 @@ describe("WebSocketManager", () => {
 			setHidden(false);
 		});
 
-		it("does not pause when option is omitted (default off)", () => {
+		it("pauses by default when option is omitted", () => {
 			const transport = new MockTransport();
 			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
 				...testSerialization,
@@ -384,6 +384,28 @@ describe("WebSocketManager", () => {
 				transport,
 				pingIntervalMs: 100,
 				pongTimeoutMs: 50,
+				...pingConfig,
+			});
+			manager.connect();
+			transport.simulateOpen();
+			transport.sentMessages = [];
+
+			setHidden(true);
+			vi.advanceTimersByTime(500);
+
+			const pings = transport.sentMessages.filter((m) => m.includes('"ping"'));
+			expect(pings).toHaveLength(0);
+		});
+
+		it("keeps pinging while hidden when explicitly disabled", () => {
+			const transport = new MockTransport();
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+				pingIntervalMs: 100,
+				pongTimeoutMs: 50,
+				pauseHeartbeatWhenHidden: false,
 				...pingConfig,
 			});
 			manager.connect();
@@ -791,12 +813,12 @@ describe("WebSocketManager", () => {
 		});
 	});
 
-	describe("subscribeToConnectionState", () => {
+	describe("addConnectionStateListener", () => {
 		it("notifies listeners on state change", () => {
 			const { manager, transport } = createManager();
 			const stateChanges: TConnectionState[] = [];
 
-			manager.subscribeToConnectionState(() => {
+			manager.addConnectionStateListener(() => {
 				stateChanges.push(manager.getConnectionState());
 			});
 
@@ -811,7 +833,7 @@ describe("WebSocketManager", () => {
 			const { manager, transport } = createManager();
 			let callCount = 0;
 
-			const unsub = manager.subscribeToConnectionState(() => {
+			const unsub = manager.addConnectionStateListener(() => {
 				callCount++;
 			});
 
@@ -920,17 +942,14 @@ describe("WebSocketManager", () => {
 			expect(manager.getRefCount("nonexistent")).toBe(0);
 		});
 
-		it("connect after dispose resets disposed flag", () => {
-			const { manager, transport, states } = createManager();
+		it("throws when connect is called after dispose", () => {
+			const { manager, transport } = createManager();
 			manager.connect();
 			transport.simulateOpen();
 
 			manager.dispose();
 
-			manager.connect();
-			transport.simulateOpen();
-
-			expect(states[states.length - 1]).toBe("connected");
+			expect(() => manager.connect()).toThrow(/disposed/);
 		});
 
 		it("connect is idempotent when already connecting", () => {
@@ -965,7 +984,8 @@ describe("WebSocketManager", () => {
 			expect(transport.disconnectCalls[0].code).toBe(4000);
 			expect(transport.disconnectCalls[0].reason).toBe("force reconnect");
 			expect(transport.connectCalls).toHaveLength(2);
-			expect(states).toContain("disconnected");
+			// Coalesced transition: connected -> connecting (no "disconnected" blip).
+			expect(states).not.toContain("disconnected");
 			expect(states).toContain("connecting");
 
 			transport.simulateOpen();

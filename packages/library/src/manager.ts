@@ -84,6 +84,10 @@ export class WebSocketManager<
 	private readonly inFlightMessages = new Map<string, TClientMsg>();
 	private readonly connectionStateListeners = new ListenerSet<[]>();
 	private readonly messageListeners = new ListenerSet<[TServerMsg]>();
+	private readonly keyedMessageListeners = new Map<
+		string,
+		Set<(msg: TServerMsg) => void>
+	>();
 	private readonly pendingSubscriptionListeners = new ListenerSet<[]>();
 	private readonly sendIntentListeners = new ListenerSet<
 		[TSendParams<TClientMsg>]
@@ -131,7 +135,7 @@ export class WebSocketManager<
 		}
 		this.pingIntervalMs = config.pingIntervalMs ?? PING_INTERVAL_MS;
 		this.pongTimeoutMs = config.pongTimeoutMs ?? PONG_TIMEOUT_MS;
-		this.pauseHeartbeatWhenHidden = config.pauseHeartbeatWhenHidden ?? false;
+		this.pauseHeartbeatWhenHidden = config.pauseHeartbeatWhenHidden ?? true;
 		this.reconnectMaxAttempts =
 			config.reconnectMaxAttempts ?? RECONNECT_MAX_ATTEMPTS;
 		this.reconnectBaseDelayMs =
@@ -153,7 +157,11 @@ export class WebSocketManager<
 	// ── Connection lifecycle ──────────────────────────────────────────
 
 	connect(): void {
-		this.disposed = false;
+		if (this.disposed) {
+			throw new Error(
+				"WebSocketManager has been disposed and cannot be reused. Construct a new manager.",
+			);
+		}
 		if (
 			this.connectionState === "connected" ||
 			this.connectionState === "connecting"
@@ -223,20 +231,27 @@ export class WebSocketManager<
 		this.clearPendingSubscriptions();
 		this.dropInFlight();
 
-		// Detach old handlers to prevent stale close events from interfering
+		// Detach old handlers so a stale ws cannot fire close/open/message/error
+		// after we have moved on.
 		this.transport.onclose = null;
 		this.transport.onopen = null;
 		this.transport.onmessage = null;
 		this.transport.onerror = null;
 		this.transport.disconnect(4000, "force reconnect");
 
-		this.setConnectionState("disconnected");
-		this.removeWindowListeners();
-
-		// Start fresh connection
+		// Skip the "disconnected" blip — go straight to "connecting" so UI
+		// observers see one transition instead of two.
 		this.intentionalClose = false;
 		this.reconnectAttempt = 0;
-		this.connect();
+		this.setConnectionState("connecting");
+
+		this.transport.onopen = () => this.handleOpen();
+		this.transport.onclose = (e) => this.handleClose(e);
+		this.transport.onmessage = (e) => this.handleMessage(e);
+		this.transport.onerror = () => this.emitDebug({ type: "transport-error" });
+
+		this.initiateTransportConnect(++this.connectAttemptId);
+		this.addWindowListeners();
 	}
 
 	dispose(): void {
@@ -246,6 +261,7 @@ export class WebSocketManager<
 		this.subscriptionData.clear();
 		this.clearPendingSubscriptions();
 		this.inFlightMessages.clear();
+		this.keyedMessageListeners.clear();
 		this.emitDebug({ type: "dispose" });
 	}
 
@@ -313,7 +329,7 @@ export class WebSocketManager<
 		return this.pendingSubscriptions.has(key);
 	}
 
-	subscribeToPendingSubscriptions(listener: () => void): () => void {
+	addPendingSubscriptionListener(listener: () => void): () => void {
 		return this.pendingSubscriptionListeners.add(listener);
 	}
 
@@ -364,14 +380,40 @@ export class WebSocketManager<
 
 	// ── Observable connection state ──────────────────────────────────
 
-	subscribeToConnectionState(listener: () => void): () => void {
+	addConnectionStateListener(listener: () => void): () => void {
 		return this.connectionStateListeners.add(listener);
 	}
 
 	// ── Observable messages ───────────────────────────────────────────
 
+	/**
+	 * Firehose: invoked for every parsed server message. Use for the
+	 * inspector, logging, or catch-all bridges. For per-type handlers,
+	 * prefer `addEventListener(value, cb)` — it dispatches in O(1) by the
+	 * configured discriminator instead of fanning out to every listener.
+	 */
 	addMessageListener(cb: (msg: TServerMsg) => void): () => void {
 		return this.messageListeners.add(cb);
+	}
+
+	/**
+	 * Keyed dispatch: invoke `cb` only when the incoming message's
+	 * discriminator value equals `value`. O(1) per frame instead of O(N).
+	 * `useSocketEvent` and `useSocketEventBatch` use this internally.
+	 */
+	addEventListener(value: string, cb: (msg: TServerMsg) => void): () => void {
+		let set = this.keyedMessageListeners.get(value);
+		if (!set) {
+			set = new Set();
+			this.keyedMessageListeners.set(value, set);
+		}
+		set.add(cb);
+		return () => {
+			const s = this.keyedMessageListeners.get(value);
+			if (!s) return;
+			s.delete(cb);
+			if (s.size === 0) this.keyedMessageListeners.delete(value);
+		};
 	}
 
 	addSendIntentListener(
@@ -491,6 +533,13 @@ export class WebSocketManager<
 		const subKey = this.getSubscriptionResolvedKeyCb?.(parsed);
 		if (subKey !== undefined) this.resolvePendingSubscription(subKey);
 
+		const discriminatorValue = (parsed as Record<TKey, string>)[
+			this.discriminator
+		];
+		const keyedSet = this.keyedMessageListeners.get(discriminatorValue);
+		if (keyedSet) {
+			for (const cb of keyedSet) cb(parsed);
+		}
 		this.messageListeners.emit(parsed);
 	}
 
@@ -576,7 +625,8 @@ export class WebSocketManager<
 
 	private restoreSubscriptions(): string[] {
 		const restoredKeys: string[] = [];
-		for (const key of this.subscriptionData.keys()) {
+		for (const [key, data] of this.subscriptionData) {
+			if (!data) continue;
 			this.sendSubscribe(key);
 			restoredKeys.push(key);
 		}
@@ -628,14 +678,16 @@ export class WebSocketManager<
 	private sendSubscribe(key: string): void {
 		if (this.connectionState !== "connected") return;
 		const data = this.subscriptionData.get(key);
+		// No payload means there is nothing to ack on the wire — skip the
+		// pending marker so `useSocketPendingSubscription` does not get
+		// stuck at true forever for bookkeeping-only subscriptions.
+		if (!data) return;
 		const added = !this.pendingSubscriptions.has(key);
 		this.pendingSubscriptions.add(key);
 		if (added) {
 			this.pendingSubscriptionListeners.emit();
 		}
-		if (data) {
-			this.rawSend(this.serialize(data));
-		}
+		this.rawSend(this.serialize(data));
 	}
 
 	private setConnectionState(state: TConnectionState): void {

@@ -33,7 +33,7 @@ export const prerender = true;
 				{ name: "isPong", type: "(msg: TServerMsg) => boolean", description: "Return true if an incoming message is a pong" },
 				{ name: "pingIntervalMs", type: "number", defaultValue: "30000", description: "Milliseconds between pings" },
 				{ name: "pongTimeoutMs", type: "number", defaultValue: "10000", description: "Milliseconds to wait for a pong before disconnecting" },
-				{ name: "pauseHeartbeatWhenHidden", type: "boolean", defaultValue: "false", description: "Pause ping/pong while document.hidden and resume on visibility. Avoids spurious pong timeouts from background-tab throttling on mobile. Requires ping/isPong to take effect" },
+				{ name: "pauseHeartbeatWhenHidden", type: "boolean", defaultValue: "true", description: "Pause ping/pong while document.hidden and resume on visibility. Avoids spurious pong timeouts from background-tab throttling on mobile. Pass false to keep heartbeating in background tabs. Requires ping/isPong to take effect" },
 				{ name: "reconnectMaxAttempts", type: "number", defaultValue: "10", description: "Maximum reconnection attempts. Pass Number.POSITIVE_INFINITY to retry forever" },
 				{ name: "reconnectBaseDelayMs", type: "number", defaultValue: "1000", description: "Initial reconnection delay" },
 				{ name: "reconnectMaxDelayMs", type: "number", defaultValue: "30000", description: "Maximum reconnection delay (cap on the exponential backoff)" },
@@ -201,7 +201,7 @@ useSocketEvent(manager, "notification", (msg) => {
 const stop1 = manager.addSendIntentListener(({ data, ackId }) => { /* ... */ });
 const stop2 = manager.addInFlightDropListener((messages) => { /* ... */ });
 const stop3 = manager.addLastUnsubscribeListener((key, data) => { /* ... */ });
-const stop4 = manager.subscribeToConnectionState(() => {
+const stop4 = manager.addConnectionStateListener(() => {
   const state = manager.getConnectionState();
 });
 

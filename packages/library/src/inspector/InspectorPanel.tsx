@@ -39,18 +39,29 @@ export function InspectorPanel<
 
 	useEffect(() => {
 		const div = document.createElement("div");
-		div.id = "react-socket-inspector";
+		div.className = "react-socket-inspector-root";
 		document.body.appendChild(div);
 
-		const style = document.createElement("style");
-		style.setAttribute("data-rsi", "");
-		style.textContent = inspectorCss;
-		document.head.appendChild(style);
+		// One stylesheet per document, refcounted across InspectorPanel
+		// instances so HMR reloads or duplicate mounts do not stack styles.
+		const existing =
+			document.head.querySelector<HTMLStyleElement>("style[data-rsi]");
+		const style = existing ?? document.createElement("style");
+		if (!existing) {
+			style.setAttribute("data-rsi", "");
+			style.setAttribute("data-rsi-refs", "0");
+			style.textContent = inspectorCss;
+			document.head.appendChild(style);
+		}
+		const refs = Number(style.getAttribute("data-rsi-refs") ?? "0") + 1;
+		style.setAttribute("data-rsi-refs", String(refs));
 
 		setContainer(div);
 		return () => {
-			document.body.removeChild(div);
-			document.head.removeChild(style);
+			div.remove();
+			const remaining = Number(style.getAttribute("data-rsi-refs") ?? "1") - 1;
+			if (remaining <= 0) style.remove();
+			else style.setAttribute("data-rsi-refs", String(remaining));
 		};
 	}, []);
 

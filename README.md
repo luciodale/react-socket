@@ -119,8 +119,9 @@ useSocketInFlightDrop(manager, (messages) => { /* ... */ })
 // Fires after every (re)connect, with the list of restored subscription keys
 useSocketReady(manager, (restoredKeys) => { /* ... */ })
 
-// Fires when the last subscriber for a key unmounts
-useSocketLastUnsubscribe(manager, (key, data) => { /* ... */ })
+// Fires when the last subscriber for a key unmounts.
+// 2nd arg is the original subscribe payload (first-payload wins).
+useSocketLastUnsubscribe(manager, (key, subscribePayload) => { /* ... */ })
 
 // Observable connection state
 const state = useSocketConnectionState(manager)

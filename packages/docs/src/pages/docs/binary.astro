@@ -162,9 +162,9 @@ const manager = new WebSocketManager<
 		<p class="text-white/60 mb-4 leading-relaxed">
 			<InlineCode>MockTransport</InlineCode>'s <InlineCode>sentMessages</InlineCode>
 			holds the raw wire payload. For binary, assert against the
-			<InlineCode>ArrayBuffer</InlineCode> directly.
-			<InlineCode>lastSentParsed</InlineCode> only works for string payloads;
-			use a custom decoder in tests for binary frames.
+			<InlineCode>ArrayBuffer</InlineCode> directly. For string payloads, parse
+			with <InlineCode>JSON.parse(transport.sentMessages.at(-1) as string)</InlineCode>;
+			for binary, decode with your own helper before comparing.
 		</p>
 	</ContentSection>
 

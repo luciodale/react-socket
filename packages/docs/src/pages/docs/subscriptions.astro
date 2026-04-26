@@ -93,6 +93,27 @@ function MessageList({ spaceId }: { spaceId: string }) {
 			removes the entire class of bug — the payload is computed in one
 			place, the same way, every time.
 		</Callout>
+		<Callout type="info" title="Late joiners and `enabled`">
+			A component flipping <InlineCode>enabled: false → true</InlineCode> on a
+			key that another component already subscribed to is just a ref-count
+			bump — its <InlineCode>subscribe</InlineCode> payload never reaches
+			the wire (first-payload wins). If the joiner needs to identify itself,
+			send a separate <InlineCode>useSocketSend</InlineCode> message instead
+			of relying on the subscribe payload.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Bookkeeping-only subscribe (no payload)">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			You can call <InlineCode>useSocketSubscription</InlineCode> with no
+			<InlineCode>subscribe</InlineCode> / <InlineCode>unsubscribe</InlineCode>
+			payload at all. The ref count still bumps and
+			<InlineCode>useSocketLastUnsubscribe</InlineCode> still fires when it
+			reaches zero, but nothing goes on the wire.
+			<InlineCode>useSocketPendingSubscription</InlineCode> stays
+			<InlineCode>false</InlineCode> for those keys (there is no server ack
+			to wait for).
+		</p>
 	</ContentSection>
 
 	<ContentSection label="Ref counting in action">

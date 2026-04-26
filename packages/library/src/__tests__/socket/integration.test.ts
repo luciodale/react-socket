@@ -95,7 +95,7 @@ function createTestSystem(
 		onReady() {},
 	});
 
-	manager.subscribeToConnectionState(() => {
+	manager.addConnectionStateListener(() => {
 		connectionStates.push(manager.getConnectionState());
 	});
 
