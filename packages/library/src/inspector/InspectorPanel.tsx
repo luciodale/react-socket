@@ -10,8 +10,12 @@ import inspectorCss from "./inspector.css?inline";
 import type { TInspectorPosition } from "./inspector-types";
 import { type TTab, useInspectorPanel } from "./use-inspector-panel";
 
-type TInspectorPanelProps<TClientMsg, TServerMsg> = {
-	manager: WebSocketManager<TClientMsg, TServerMsg>;
+type TInspectorPanelProps<
+	TClientMsg,
+	TServerMsg extends Record<TKey, string>,
+	TKey extends string = "type",
+> = {
+	manager: WebSocketManager<TClientMsg, TServerMsg, TKey>;
 	maxSnapshots?: number;
 	defaultPosition?: TInspectorPosition;
 };
@@ -21,11 +25,15 @@ const TABS: { key: TTab; label: string }[] = [
 	{ key: "diff", label: "Diff" },
 ];
 
-export function InspectorPanel<TClientMsg, TServerMsg>({
+export function InspectorPanel<
+	TClientMsg,
+	TServerMsg extends Record<TKey, string>,
+	TKey extends string = "type",
+>({
 	manager,
 	maxSnapshots = 500,
 	defaultPosition = "bottom-right",
-}: TInspectorPanelProps<TClientMsg, TServerMsg>) {
+}: TInspectorPanelProps<TClientMsg, TServerMsg, TKey>) {
 	const [container, setContainer] = useState<HTMLDivElement | null>(null);
 	const panel = useInspectorPanel(manager, maxSnapshots, defaultPosition);
 

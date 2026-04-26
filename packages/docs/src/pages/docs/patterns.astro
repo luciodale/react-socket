@@ -1,0 +1,535 @@
+---
+import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
+import DocsPage from "../../layouts/DocsPage.astro";
+import { href } from "../../lib/link";
+
+export const prerender = true;
+---
+
+<DocsPage
+	title="Patterns"
+	description="Scenario driven examples. Pick the pattern that matches the question you are trying to answer."
+>
+	<ContentSection label="Fire and forget: toast + invalidate">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			<strong class="text-white/80">When to use.</strong> An incoming event
+			should trigger a side effect (toast, query invalidation, analytics
+			ping) and then disappear. You do not need to render from the event; a
+			callback is the correct primitive.
+		</p>
+		<CodeBlock
+			code={`import { useSocketEvent } from "@luciodale/react-socket";
+
+function NotificationsBridge() {
+  const qc = useQueryClient();
+
+  useSocketEvent(manager, "notification", (msg) => {
+    toast(msg.title);
+    qc.invalidateQueries({ queryKey: ["inbox"] });
+  });
+
+  return null;
+}
+
+// mounted once in app shell
+<AppShell>
+  <NotificationsBridge />
+  <Routes />
+</AppShell>`}
+			language="tsx"
+			filename="NotificationsBridge.tsx"
+		/>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			Grep <InlineCode>"notification"</InlineCode> — one hit. Auto cleanup
+			on unmount. Zero <InlineCode>useEffect</InlineCode> in user code.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Rendered state from a stream with history">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			<strong class="text-white/80">When to use.</strong> Many components
+			need to render from the same stream, and you need history. A single
+			bridge owns the subscription, a zustand store owns the data, consumers
+			read slices.
+		</p>
+		<CodeBlock
+			code={`import { create } from "zustand";
+
+type TChatMessage = { id: string; userId: string; text: string };
+
+export const useChatStore = create<{
+  messagesByRoom: Record<string, TChatMessage[]>;
+  append: (roomId: string, msg: TChatMessage) => void;
+}>((set) => ({
+  messagesByRoom: {},
+  append: (roomId, msg) =>
+    set((s) => ({
+      messagesByRoom: {
+        ...s.messagesByRoom,
+        [roomId]: [...(s.messagesByRoom[roomId] ?? []), msg],
+      },
+    })),
+}));`}
+			language="tsx"
+			filename="chat-store.ts"
+		/>
+		<CodeBlock
+			code={`function ChatBridge() {
+  useSocketEvent(manager, "chat", (msg) => {
+    useChatStore.getState().append(msg.roomId, {
+      id: msg.id,
+      userId: msg.userId,
+      text: msg.text,
+    });
+  });
+  return null;
+}`}
+			language="tsx"
+			filename="ChatBridge.tsx"
+		/>
+		<CodeBlock
+			code={`// Consumer: active room — reads its slice, no effect code
+function ChatRoom({ roomId }: { roomId: string }) {
+  const messages = useChatStore(
+    (s) => s.messagesByRoom[roomId] ?? [],
+  );
+  return <MessageList messages={messages} />;
+}
+
+// Consumer: unread badge — different slice, same store
+function UnreadBadge({ roomId }: { roomId: string }) {
+  const count = useChatStore(
+    (s) => (s.messagesByRoom[roomId] ?? []).length,
+  );
+  return <span>{count}</span>;
+}`}
+			language="tsx"
+			filename="consumers.tsx"
+		/>
+		<Callout type="tip">
+			One bridge. One writer. N readers. Nobody else touches the socket.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Subscribe only, no read">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			<strong class="text-white/80">When to use.</strong> The component
+			needs the server to keep a stream alive (presence, keep alive, typing
+			pings) but does not render from it. Subscribing and reading are
+			separate concerns — compose only what you need.
+		</p>
+		<CodeBlock
+			code={`function PresenceKeepalive() {
+  useSocketSubscription(manager, {
+    key: "presence",
+    subscribe: { type: "sub-presence" },
+    unsubscribe: { type: "unsub-presence" },
+  });
+  return null;
+}`}
+			language="tsx"
+			filename="PresenceKeepalive.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Joining state">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			<strong class="text-white/80">When to use.</strong> Show "joining..."
+			while the subscribe is in flight. Requires
+			<InlineCode>getSubscriptionResolvedKey</InlineCode> in the manager
+			config so the library knows when the server confirmed.
+		</p>
+		<CodeBlock
+			code={`// manager config
+{
+  getSubscriptionResolvedKey: (msg) =>
+    msg.type === "subscribe-ack" ? msg.channel : undefined,
+}`}
+			language="tsx"
+			filename="manager.ts"
+		/>
+		<CodeBlock
+			code={`function ChatRoom({ roomId }: { roomId: string }) {
+  useSocketSubscription(manager, {
+    key: roomId,
+    subscribe: { type: "subscribe", channel: roomId },
+    unsubscribe: { type: "unsubscribe", channel: roomId },
+  });
+
+  const joining = useSocketPendingSubscription(manager, roomId);
+  if (joining) return <span>joining...</span>;
+
+  return <Room />;
+}`}
+			language="tsx"
+			filename="ChatRoom.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Typed send with disabled UI">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			<strong class="text-white/80">When to use.</strong> Disable a send
+			button when disconnected. Compose
+			<InlineCode>useSocketSend</InlineCode> with
+			<InlineCode>useSocketConnectionState</InlineCode> — they are
+			deliberately separate so components that do not need a disabled state
+			do not re render on every state transition.
+		</p>
+		<CodeBlock
+			code={`function ChatInput() {
+  const state = useSocketConnectionState(manager);
+  const { send } = useSocketSend(manager);
+  const canSend = state === "connected";
+
+  return (
+    <button
+      disabled={!canSend}
+      onClick={() => send({ type: "chat", text: "hi" })}
+    >
+      send
+    </button>
+  );
+}`}
+			language="tsx"
+			filename="ChatInput.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Acknowledged send with optimistic UI">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			<strong class="text-white/80">When to use.</strong> Track outbound
+			messages as pending until the server confirms. The extractor
+			<InlineCode>getAckId</InlineCode> plumbs ack matching; your UI lives
+			in <InlineCode>onSendIntent</InlineCode> (optimistic insert) and a
+			<InlineCode>useSocketEvent("delivered", ...)</InlineCode> (flip to
+			delivered).
+		</p>
+		<CodeBlock
+			code={`// manager config — extractor is transport plumbing
+{
+  getAckId: (msg) => (msg.type === "delivered" ? msg.ackId : undefined),
+}`}
+			language="tsx"
+			filename="manager.ts"
+		/>
+		<CodeBlock
+			code={`// Bridge component mounted once in app shell
+function ChatOptimisticBridge() {
+  // optimistic insert: fires on every send(), even offline
+  useSocketSendIntent(manager, ({ data, ackId }) => {
+    if (data.type === "message" && ackId) {
+      useChatStore.getState().insertOptimistic(data, ackId);
+    }
+  });
+
+  // mark as delivered on server ack
+  useSocketEvent(manager, "delivered", (msg) => {
+    useChatStore.getState().markDelivered(msg.ackId);
+  });
+
+  // mark as failed when in-flight drops on disconnect
+  useSocketInFlightDrop(manager, (messages) => {
+    for (const { id } of messages) {
+      useChatStore.getState().markFailed(id);
+    }
+  });
+
+  return null;
+}`}
+			language="tsx"
+			filename="ChatOptimisticBridge.tsx"
+		/>
+		<CodeBlock
+			code={`function ChatInput({ roomId }: { roomId: string }) {
+  const { send } = useSocketSend(manager);
+
+  function onSend(text: string) {
+    const id = crypto.randomUUID();
+    send({ type: "message", id, roomId, text }, id); // 2nd arg: ackId
+  }
+
+  return <button onClick={() => onSend("hi")}>send</button>;
+}`}
+			language="tsx"
+			filename="ChatInput.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Refetch after reconnect">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			<strong class="text-white/80">When to use.</strong> You cache
+			realtime data behind a REST query (React Query, SWR, etc.) and need
+			to invalidate after a reconnect since events may have been missed
+			while offline.
+			<InlineCode>useSocketReady</InlineCode> fires after every successful
+			(re)connect once subscriptions are restored.
+		</p>
+		<CodeBlock
+			code={`function InboxRefetchBridge() {
+  const qc = useQueryClient();
+
+  useSocketReady(manager, (restoredKeys) => {
+    qc.invalidateQueries({ queryKey: ["inbox"] });
+    // restoredKeys is the list of subscriptions the library replayed
+    // useful for logging or targeted refetches
+  });
+
+  return null;
+}`}
+			language="tsx"
+			filename="InboxRefetchBridge.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Store eviction when nobody is watching">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			<strong class="text-white/80">When to use.</strong> A channel
+			accumulated history in your store, the last subscriber just
+			unmounted, and keeping the data around forever wastes memory. Use
+			<InlineCode>useSocketLastUnsubscribe</InlineCode> to evict.
+		</p>
+		<CodeBlock
+			code={`function ChatEvictionBridge() {
+  useSocketLastUnsubscribe(manager, (key) => {
+    if (key.startsWith("room:")) {
+      useChatStore.getState().evictRoom(key);
+    }
+  });
+  return null;
+}`}
+			language="tsx"
+			filename="ChatEvictionBridge.tsx"
+		/>
+		<Callout type="warning" title="Mount on something that outlives subscribers">
+			If you put this hook inside the same component that calls
+			<InlineCode>useSocketSubscription</InlineCode>, the hook unmounts
+			together with the last subscriber and never fires. Mount it at the
+			app shell or a persistent layout. The reactor has to still be there
+			when the last consumer leaves.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Non standard discriminator">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			<strong class="text-white/80">When to use.</strong> Your server uses
+			<InlineCode>kind</InlineCode>, <InlineCode>op</InlineCode>, or
+			another key instead of <InlineCode>type</InlineCode>. Two options:
+			rename once at the boundary, or pass the discriminator explicitly.
+			Prefer the rename — one place, keeps library defaults everywhere.
+		</p>
+		<CodeBlock
+			code={`// Wire shape (what the server actually emits)
+type TServerMsgWire =
+  | { kind: "notification"; title: string }
+  | { kind: "user-typing"; userId: string };
+
+// App shape (what the library and your code use)
+type TServerMsg =
+  | { type: "notification"; title: string }
+  | { type: "user-typing"; userId: string };
+
+const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  url: "wss://...",
+  serialize: JSON.stringify,
+  deserialize: (raw) => {
+    const { kind, ...rest } = JSON.parse(raw) as TServerMsgWire;
+    return { type: kind, ...rest } as TServerMsg;
+  },
+});`}
+			language="tsx"
+			filename="boundary-map.ts"
+		/>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			If rewriting the boundary is off limits, pass the discriminator
+			explicitly:
+		</p>
+		<CodeBlock
+			code={`new WebSocketManager<TClientMsg, TServerMsgWire, "kind">({
+  url: "wss://...",
+  discriminator: "kind",
+  serialize: JSON.stringify,
+  deserialize: (raw) => JSON.parse(raw) as TServerMsgWire,
+});
+
+useSocketEvent(manager, "notification", (msg) => {
+  msg.title; // narrowed via Extract<..., { kind: "notification" }>
+});`}
+			language="tsx"
+			filename="discriminator-override.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="LLM streaming: split streaming from history">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			<strong class="text-white/80">When to use.</strong> The server
+			streams tokens as they generate. Every
+			<InlineCode>delta</InlineCode> event arrives separately and you need
+			the UI to show them as they land, without the whole conversation
+			re-rendering on every token.
+		</p>
+		<p class="text-white/60 mb-4 leading-relaxed">
+			The trick is to keep <strong class="text-white/80">streaming</strong>
+			and <strong class="text-white/80">history</strong> in separate store
+			slices. History is a frozen, append-once-per-turn list — its
+			reference doesn't change while a stream is active, so React skips
+			reconciling it. Only the streaming buffer mutates on each token, and
+			only the component reading that buffer re-renders.
+		</p>
+
+		<CodeBlock
+			code={`// Wire protocol — three events per assistant turn
+type TServerMsg =
+  | { type: "stream-start"; id: string; role: "assistant" }
+  | { type: "stream-delta"; id: string; delta: string }
+  | { type: "stream-end"; id: string };`}
+			language="tsx"
+			filename="protocol.ts"
+		/>
+
+		<CodeBlock
+			code={`// Store: two slices, different lifecycles
+type TTurn = { id: string; role: string; text: string };
+
+type TChatStore = {
+  history: TTurn[];                       // frozen until a stream completes
+  streaming: Record<string, string>;      // id -> accumulating text
+  startStream: (id: string) => void;
+  appendDelta: (id: string, delta: string) => void;
+  endStream: (id: string, role: string) => void;
+};
+
+export const useChatStore = create<TChatStore>()((set) => ({
+  history: [],
+  streaming: {},
+
+  startStream: (id) =>
+    set((s) => ({ streaming: { ...s.streaming, [id]: "" } })),
+
+  appendDelta: (id, delta) =>
+    set((s) => ({
+      streaming: {
+        ...s.streaming,
+        [id]: (s.streaming[id] ?? "") + delta,
+      },
+    })),
+
+  endStream: (id, role) =>
+    set((s) => {
+      const text = s.streaming[id] ?? "";
+      const { [id]: _, ...rest } = s.streaming;
+      return {
+        history: [...s.history, { id, role, text }],  // one spread per turn
+        streaming: rest,
+      };
+    }),
+}));`}
+			language="tsx"
+			filename="chat-store.ts"
+		/>
+
+		<CodeBlock
+			code={`// Single bridge, three events
+function StreamBridge() {
+  useSocketEvent(manager, "stream-start", (msg) => {
+    useChatStore.getState().startStream(msg.id);
+  });
+
+  useSocketEvent(manager, "stream-delta", (msg) => {
+    useChatStore.getState().appendDelta(msg.id, msg.delta);
+  });
+
+  useSocketEvent(manager, "stream-end", (msg) => {
+    useChatStore.getState().endStream(msg.id, "assistant");
+  });
+
+  return null;
+}`}
+			language="tsx"
+			filename="StreamBridge.tsx"
+		/>
+
+		<CodeBlock
+			code={`import { memo } from "react";
+import { useShallow } from "zustand/shallow";
+
+// History list — memoized, re-renders once per completed turn
+const HistoryList = memo(function HistoryList() {
+  const history = useChatStore((s) => s.history);
+  return (
+    <ul>
+      {history.map((turn) => (
+        <li key={turn.id}>
+          <strong>{turn.role}:</strong> {turn.text}
+        </li>
+      ))}
+    </ul>
+  );
+});
+
+// Streaming view — reads a single slice, re-renders on every token
+function StreamingTurn({ id }: { id: string }) {
+  const text = useChatStore((s) => s.streaming[id] ?? "");
+  return <p>{text}</p>;
+}
+
+// Active stream ids — tiny array, re-renders when streams start/end, not per token
+function ActiveStreams() {
+  const ids = useChatStore(useShallow((s) => Object.keys(s.streaming)));
+  return ids.map((id) => <StreamingTurn key={id} id={id} />);
+}`}
+			language="tsx"
+			filename="views.tsx"
+		/>
+
+		<p class="text-white/60 mt-4 leading-relaxed">
+			Putting it together: mount
+			<InlineCode>&lt;StreamBridge /&gt;</InlineCode> in the app shell,
+			render <InlineCode>&lt;HistoryList /&gt;</InlineCode> and
+			<InlineCode>&lt;ActiveStreams /&gt;</InlineCode> stacked in the chat
+			panel. Tokens only reach
+			<InlineCode>StreamingTurn</InlineCode>.
+			<InlineCode>HistoryList</InlineCode> stays completely still until
+			<InlineCode>stream-end</InlineCode>, at which point the new turn
+			appears there in a single render.
+		</p>
+
+		<Callout type="tip" title="When to virtualize">
+			This split eliminates the per-token cost. Separately,
+			<InlineCode>HistoryList</InlineCode> still renders all turns. Past
+			roughly 2k turns you want <InlineCode>react-window</InlineCode> /
+			<InlineCode>TanStack Virtual</InlineCode> /
+			<InlineCode>react-virtuoso</InlineCode> to clip to visible rows.
+			Orthogonal to the store shape.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="What user code never contains">
+		<ul class="list-disc list-inside space-y-1 text-white/60">
+			<li>A switch statement routing messages by type</li>
+			<li>
+				A call to <InlineCode>manager.ackInFlight(...)</InlineCode> or
+				<InlineCode>manager.resolvePendingSubscription(...)</InlineCode>
+			</li>
+			<li>
+				A <InlineCode>useEffect</InlineCode> wrapping
+				<InlineCode>subscribe</InlineCode> / <InlineCode>unsubscribe</InlineCode>
+			</li>
+			<li>A hand rolled pub sub layer with <InlineCode>.on</InlineCode> / <InlineCode>.remove</InlineCode></li>
+			<li>A predicate type guard to narrow incoming messages</li>
+		</ul>
+	</ContentSection>
+
+	<ContentSection label="Next">
+		<ul class="space-y-2 text-white/60">
+			<li>
+				<a href={href("/docs/api")} class="text-accent hover:underline">API Reference</a>
+			</li>
+			<li>
+				<a href={href("/docs/configuration")} class="text-accent hover:underline">Configuration</a>
+			</li>
+		</ul>
+	</ContentSection>
+</DocsPage>

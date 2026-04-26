@@ -33,9 +33,10 @@ export const prerender = true;
 				{ name: "isPong", type: "(msg: TServerMsg) => boolean", description: "Return true if an incoming message is a pong" },
 				{ name: "pingIntervalMs", type: "number", defaultValue: "30000", description: "Milliseconds between pings" },
 				{ name: "pongTimeoutMs", type: "number", defaultValue: "10000", description: "Milliseconds to wait for a pong before disconnecting" },
-				{ name: "reconnectMaxAttempts", type: "number", defaultValue: "5", description: "Maximum reconnection attempts" },
+				{ name: "pauseHeartbeatWhenHidden", type: "boolean", defaultValue: "false", description: "Pause ping/pong while document.hidden and resume on visibility. Avoids spurious pong timeouts from background-tab throttling on mobile. Requires ping/isPong to take effect" },
+				{ name: "reconnectMaxAttempts", type: "number", defaultValue: "10", description: "Maximum reconnection attempts. Pass Number.POSITIVE_INFINITY to retry forever" },
 				{ name: "reconnectBaseDelayMs", type: "number", defaultValue: "1000", description: "Initial reconnection delay" },
-				{ name: "reconnectMaxDelayMs", type: "number", defaultValue: "5000", description: "Maximum reconnection delay" },
+				{ name: "reconnectMaxDelayMs", type: "number", defaultValue: "30000", description: "Maximum reconnection delay (cap on the exponential backoff)" },
 				{ name: "transport", type: "IWebSocketTransport", description: "Custom WebSocket transport for testing or non-browser environments" },
 				{ name: "binaryType", type: '"blob" | "arraybuffer"', description: "Tell the transport which binary type to deliver. Required when sending or receiving binary frames; widen the manager's TWire / TIncoming generics accordingly" },
 				{ name: "onReady", type: "(restoredKeys: string[]) => void", description: "Fires after every (re)connect once subscriptions are restored. Best place for first-message auth and refetch logic that must run before any component mounts" },
@@ -157,9 +158,9 @@ useSocketEvent(manager, "notification", (msg) => {
 		</p>
 		<CodeBlock
 			code={`{
-  reconnectMaxAttempts: 5,
+  reconnectMaxAttempts: 10,
   reconnectBaseDelayMs: 1_000,
-  reconnectMaxDelayMs: 5_000,
+  reconnectMaxDelayMs: 30_000,
 }`}
 			language="tsx"
 			filename="reconnection.ts"

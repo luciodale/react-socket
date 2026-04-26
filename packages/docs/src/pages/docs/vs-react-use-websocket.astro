@@ -143,7 +143,7 @@ export const prerender = true;
 			code={`// react-use-websocket: types stop at the hook boundary
 const { sendJsonMessage, lastJsonMessage } = useWebSocket(url);
 
-sendJsonMessage({ action: "ecoh", text: "hi" });  // typo compiles
+sendJsonMessage({ type: "ecoh", text: "hi" });    // typo compiles
 const msg = lastJsonMessage as ServerMsg;          // trust me bro`}
 			language="tsx"
 			filename="use-websocket.tsx"
@@ -159,12 +159,14 @@ const manager = new WebSocketManager<TClientMsg, TServerMsg>({
   url,
   serialize: (msg) => JSON.stringify(msg),
   deserialize: (raw) => JSON.parse(raw) as TServerMsg,
-  onMessageReceived(msg) {
-    // msg is TServerMsg, fully narrowed by switch on action
-  },
 });
 
-manager.send({ data: { action: "ecoh", text: "hi" } }); // compile error`}
+useSocketEvent(manager, "echo", (msg) => {
+  // msg narrowed to the "echo" variant of TServerMsg
+});
+
+const { send } = useSocketSend(manager);
+send({ type: "ecoh", text: "hi" }); // compile error on the typo`}
 			language="tsx"
 			filename="react-socket.tsx"
 		/>

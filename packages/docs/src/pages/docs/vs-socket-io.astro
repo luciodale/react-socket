@@ -190,13 +190,13 @@ socket.emit("send", msg, (ok) => { /* ... */ });`}
 			narrows automatically.
 		</p>
 		<CodeBlock
-			code={`// react-socket: two unions, discriminated by action
+			code={`// react-socket: two unions, discriminated by type
 type TClientMsg =
-  | { action: "send"; ackId: string; msg: ChatMessage }
-  | { action: "subscribe"; channel: string };
+  | { type: "send"; ackId: string; msg: ChatMessage }
+  | { type: "subscribe"; channel: string };
 type TServerMsg =
-  | { action: "message"; msg: ChatMessage }
-  | { action: "price"; data: PricePayload };
+  | { type: "message"; msg: ChatMessage }
+  | { type: "price"; data: PricePayload };
 
 new WebSocketManager<TClientMsg, TServerMsg>({ /* ... */ });`}
 			language="tsx"

@@ -253,6 +253,38 @@ describe("WebSocketManager", () => {
 
 			expect(states[states.length - 1]).toBe("disconnected");
 		});
+
+		it("retries indefinitely when reconnectMaxAttempts is set to Infinity", () => {
+			const transport = new MockTransport();
+			const states: TConnectionState[] = [];
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+				reconnectBaseDelayMs: 10,
+				reconnectMaxDelayMs: 50,
+				reconnectMaxAttempts: Number.POSITIVE_INFINITY,
+			});
+			manager.subscribeToConnectionState(() => {
+				states.push(manager.getConnectionState());
+			});
+
+			manager.connect();
+			transport.simulateOpen();
+
+			// Repeatedly drop the connection — never transitions to
+			// "disconnected" because retries are unbounded.
+			for (let i = 0; i < 50; i += 1) {
+				transport.simulateClose(1006);
+				vi.advanceTimersByTime(60);
+				if (transport.connectCalls.length > i + 1) {
+					transport.simulateOpen();
+				}
+			}
+
+			expect(states[states.length - 1]).not.toBe("disconnected");
+			expect(transport.connectCalls.length).toBeGreaterThan(10);
+		});
 	});
 
 	describe("ping/pong", () => {
@@ -319,6 +351,152 @@ describe("WebSocketManager", () => {
 			);
 			vi.advanceTimersByTime(50);
 			expect(transport.disconnectCalls).toHaveLength(0);
+		});
+	});
+
+	describe("pauseHeartbeatWhenHidden", () => {
+		const pingConfig = {
+			ping: () => ({ action: "ping" }) as TTestClientMsg,
+			isPong: (msg: TTestServerMsg) => msg.action === "pong",
+		};
+
+		function setHidden(hidden: boolean): void {
+			Object.defineProperty(document, "hidden", {
+				configurable: true,
+				get: () => hidden,
+			});
+			Object.defineProperty(document, "visibilityState", {
+				configurable: true,
+				get: () => (hidden ? "hidden" : "visible"),
+			});
+			document.dispatchEvent(new Event("visibilitychange"));
+		}
+
+		afterEach(() => {
+			setHidden(false);
+		});
+
+		it("does not pause when option is omitted (default off)", () => {
+			const transport = new MockTransport();
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+				pingIntervalMs: 100,
+				pongTimeoutMs: 50,
+				...pingConfig,
+			});
+			manager.connect();
+			transport.simulateOpen();
+			transport.sentMessages = [];
+
+			setHidden(true);
+			vi.advanceTimersByTime(100);
+
+			const pings = transport.sentMessages.filter((m) => m.includes('"ping"'));
+			expect(pings.length).toBeGreaterThanOrEqual(1);
+		});
+
+		it("pauses ping while hidden and resumes when visible", () => {
+			const transport = new MockTransport();
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+				pingIntervalMs: 100,
+				pongTimeoutMs: 50,
+				pauseHeartbeatWhenHidden: true,
+				...pingConfig,
+			});
+			manager.connect();
+			transport.simulateOpen();
+			transport.sentMessages = [];
+
+			setHidden(true);
+			vi.advanceTimersByTime(500);
+			let pings = transport.sentMessages.filter((m) => m.includes('"ping"'));
+			expect(pings).toHaveLength(0);
+
+			setHidden(false);
+			vi.advanceTimersByTime(100);
+			pings = transport.sentMessages.filter((m) => m.includes('"ping"'));
+			expect(pings.length).toBeGreaterThanOrEqual(1);
+		});
+
+		it("does not fire pong timeout while hidden", () => {
+			const transport = new MockTransport();
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+				pingIntervalMs: 100,
+				pongTimeoutMs: 50,
+				pauseHeartbeatWhenHidden: true,
+				...pingConfig,
+			});
+			manager.connect();
+			transport.simulateOpen();
+
+			// Trigger a ping so a pong timer is armed.
+			vi.advanceTimersByTime(100);
+			expect(transport.disconnectCalls).toHaveLength(0);
+
+			// Hide before the pong timeout fires.
+			setHidden(true);
+			vi.advanceTimersByTime(10_000);
+
+			expect(transport.disconnectCalls).toHaveLength(0);
+		});
+
+		it("fires an immediate ping on visibility resume to validate the socket", () => {
+			const transport = new MockTransport();
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+				pingIntervalMs: 30_000,
+				pongTimeoutMs: 50,
+				pauseHeartbeatWhenHidden: true,
+				...pingConfig,
+			});
+			manager.connect();
+			transport.simulateOpen();
+
+			setHidden(true);
+			transport.sentMessages = [];
+
+			// Resume visibility — a ping should fire synchronously, well
+			// before the next pingIntervalMs would elapse.
+			setHidden(false);
+
+			const pings = transport.sentMessages.filter((m) => m.includes('"ping"'));
+			expect(pings).toHaveLength(1);
+		});
+
+		it("triggers reconnect when the immediate ping on resume gets no pong (zombie socket)", () => {
+			const transport = new MockTransport();
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+				pingIntervalMs: 30_000,
+				pongTimeoutMs: 50,
+				pauseHeartbeatWhenHidden: true,
+				...pingConfig,
+			});
+			manager.connect();
+			transport.simulateOpen();
+
+			setHidden(true);
+			setHidden(false);
+
+			// Pong never arrives — pong timeout fires and the manager
+			// disconnects with code 4000, which schedules a reconnect.
+			vi.advanceTimersByTime(50);
+			const last =
+				transport.disconnectCalls[transport.disconnectCalls.length - 1];
+			expect(last?.code).toBe(4000);
+			expect(last?.reason).toBe("pong timeout");
 		});
 	});
 

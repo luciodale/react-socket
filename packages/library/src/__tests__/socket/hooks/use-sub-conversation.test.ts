@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useConnectionState } from "../../../hooks";
+import { useSocketConnectionState } from "../../../hooks";
 import { WebSocketManager } from "../../../manager";
 import { MockTransport } from "../../helpers/mock-transport";
 
@@ -8,12 +8,13 @@ function createTestManager() {
 	const transport = new MockTransport();
 	const manager = new WebSocketManager<
 		Record<string, unknown>,
-		Record<string, unknown>
+		{ type: string } & Record<string, unknown>
 	>({
 		url: "ws://test",
 		transport,
 		serialize: (msg) => JSON.stringify(msg),
-		deserialize: (raw) => JSON.parse(raw) as Record<string, unknown>,
+		deserialize: (raw) =>
+			JSON.parse(raw) as { type: string } & Record<string, unknown>,
 	});
 	return { manager, transport };
 }
@@ -27,11 +28,11 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-describe("useConnectionState", () => {
+describe("useSocketConnectionState", () => {
 	it("returns current connection state and updates reactively", () => {
 		const { manager, transport } = createTestManager();
 
-		const { result } = renderHook(() => useConnectionState(manager));
+		const { result } = renderHook(() => useSocketConnectionState(manager));
 		expect(result.current).toBe("disconnected");
 
 		act(() => {

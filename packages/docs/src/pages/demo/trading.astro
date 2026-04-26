@@ -1,0 +1,96 @@
+---
+import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
+import { Trading } from "../../components/demos/Trading";
+import DocsPage from "../../layouts/DocsPage.astro";
+import { href } from "../../lib/link";
+
+export const prerender = true;
+---
+
+<DocsPage title="Trading ticks" description="Side-by-side per-event vs batched rendering for a market data feed at 50 ticks/sec.">
+	<ContentSection label="Trading ticks">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Market data is the textbook case for receive-side backpressure: 50+
+			messages per second, every one identically shaped, with the only
+			thing that matters being <em>the latest value</em>. Re-rendering on
+			every tick is correct semantics and ruinous performance. Batching
+			collapses the burst into one render per flush window with the same
+			latest-value guarantee.
+		</p>
+		<p class="text-white/60 leading-relaxed">
+			Two panels driven by the same wire stream. Left:
+			<InlineCode>useSocketEvent</InlineCode>, one render per tick. Right:
+			<InlineCode>useSocketEventBatch</InlineCode> at
+			<InlineCode>flushMs: 100</InlineCode>, ~10 renders/sec for the same
+			data.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Live demo">
+		<Trading client:load />
+	</ContentSection>
+
+	<ContentSection label="Per-event (the bad one)">
+		<CodeBlock
+			code={`function PerEventQuote({ manager }) {
+  const [latest, setLatest] = useState<TServerMsg | null>(null);
+  const [received, setReceived] = useState(0);
+
+  useSocketEvent(manager, "tick", (msg) => {
+    setLatest(msg);
+    setReceived((n) => n + 1);
+  });
+
+  return <Quote bid={latest?.bid} ask={latest?.ask} last={latest?.last} />;
+}`}
+			language="tsx"
+			filename="PerEventQuote.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Batched (the right one)">
+		<CodeBlock
+			code={`function BatchedQuote({ manager }) {
+  const [latest, setLatest] = useState<TServerMsg | null>(null);
+  const [received, setReceived] = useState(0);
+
+  useSocketEventBatch(
+    manager,
+    "tick",
+    (msgs) => {
+      if (msgs.length === 0) return;
+      setReceived((n) => n + msgs.length);
+      // Only the last value matters; intermediate ticks would just thrash the DOM
+      setLatest(msgs[msgs.length - 1]);
+    },
+    { flushMs: 100 },
+  );
+
+  return <Quote bid={latest?.bid} ask={latest?.ask} last={latest?.last} />;
+}`}
+			language="tsx"
+			filename="BatchedQuote.tsx"
+		/>
+		<Callout type="tip" title="Picking flushMs">
+			60–100ms is the sweet spot for trading UIs: well under the 200ms
+			users perceive as "instant," far above the 16ms frame budget that
+			causes jank. For a price ladder with 50 instruments, flushing every
+			100ms means 10 batched renders/sec instead of 2,500 individual ones.
+			See <a href={href("/docs/backpressure")} class="text-accent hover:underline">Backpressure</a>
+			for picking values for your domain.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="When you don't want batching">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Batching is wrong when each event matters individually. Order
+			fills, trade confirmations, position updates — anything you would
+			log or alert on per event — must use
+			<InlineCode>useSocketEvent</InlineCode>. Use batching only for
+			"snapshot of the latest value" data.
+		</p>
+	</ContentSection>
+</DocsPage>

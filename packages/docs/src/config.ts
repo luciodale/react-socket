@@ -17,7 +17,7 @@ export const siteConfig: SiteConfig = {
 	},
 	navLinks: [
 		{ href: "/docs/getting-started", label: "Docs" },
-		{ href: "/demo/fire-and-forget", label: "Examples" },
+		{ href: "/demo/quick-prompt", label: "Examples" },
 	],
 	sidebarSections: [
 		{
@@ -33,7 +33,7 @@ export const siteConfig: SiteConfig = {
 			links: [
 				{ href: "/docs/patterns", label: "Patterns" },
 				{ href: "/docs/subscriptions", label: "Subscriptions" },
-				{ href: "/docs/optimistic-updates", label: "Sending Messages" },
+				{ href: "/docs/optimistic-updates", label: "Sending & Optimistic UI" },
 				{ href: "/docs/reconnection", label: "Reconnection" },
 				{ href: "/docs/auth", label: "Authentication" },
 				{ href: "/docs/error-handling", label: "Error handling" },
@@ -47,14 +47,13 @@ export const siteConfig: SiteConfig = {
 		{
 			title: "Examples",
 			links: [
-				{ href: "/demo/in-component-echo", label: "In-Component Echo" },
-				{ href: "/demo/fire-and-forget", label: "Fire and Forget" },
-				{ href: "/demo/chat-room", label: "Chat Room" },
-				{ href: "/demo/llm-streaming", label: "LLM Streaming" },
-				{ href: "/demo/undelivered-sync", label: "Undelivered Sync" },
-				{ href: "/demo/auth-refresh", label: "First-message auth" },
-				{ href: "/demo/multi-connection", label: "Multiple connections" },
-				{ href: "/demo/high-frequency-stream", label: "High-frequency stream" },
+				{ href: "/demo/quick-prompt", label: "Quick prompt" },
+				{ href: "/demo/ai-conversation", label: "AI conversation" },
+				{ href: "/demo/space", label: "Space" },
+				{ href: "/demo/undelivered-sync", label: "Space persistence" },
+				{ href: "/demo/feed", label: "Activity feed" },
+				{ href: "/demo/trading", label: "Trading ticks" },
+				{ href: "/demo/auth", label: "Authentication" },
 				{ href: "/demo/inspector", label: "Inspector" },
 			],
 		},

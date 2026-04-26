@@ -8,8 +8,12 @@ import { useSnapshotNavigation } from "./use-snapshot-navigation";
 
 export type TTab = "state" | "diff";
 
-export function useInspectorPanel<TClientMsg, TServerMsg>(
-	manager: WebSocketManager<TClientMsg, TServerMsg>,
+export function useInspectorPanel<
+	TClientMsg,
+	TServerMsg extends Record<TKey, string>,
+	TKey extends string = "type",
+>(
+	manager: WebSocketManager<TClientMsg, TServerMsg, TKey>,
 	maxSnapshots: number,
 	defaultPosition: TInspectorPosition,
 ) {

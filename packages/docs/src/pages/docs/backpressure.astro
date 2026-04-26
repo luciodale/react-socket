@@ -54,6 +54,18 @@ const orderingSample = `useSocketEventBatch(
   },
   { flushMs: 16 },
 );`;
+
+const idleSample = `// Pair flushMs with idleMs to flush early when the stream goes quiet.
+// Without idleMs, the last 1-3 tokens of an LLM stream sit in the buffer
+// waiting for the next interval tick, producing a visible stall.
+useSocketEventBatch(
+  manager,
+  "stream-delta",
+  (msgs) => {
+    for (const m of msgs) appendDelta(m.id, m.delta);
+  },
+  { flushMs: 16, idleMs: 8 },
+);`;
 ---
 
 <DocsPage title="Backpressure">
@@ -106,6 +118,24 @@ const orderingSample = `useSocketEventBatch(
 			this for stream-delta or any other accumulating sequence:
 		</p>
 		<CodeBlock code={orderingSample} language="tsx" filename="streaming.tsx" />
+	</ContentSection>
+
+	<ContentSection label="Trailing-latency: idleMs">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			<InlineCode>flushMs</InlineCode> alone produces a visible stall at
+			the end of a stream: the last few events sit in the buffer waiting
+			for the next interval tick. Pass <InlineCode>idleMs</InlineCode>
+			alongside it and the batch also flushes after that many ms of
+			silence on the channel. Typical pairing for an LLM token stream:
+			<InlineCode>{"{ flushMs: 16, idleMs: 8 }"}</InlineCode> so the
+			final tokens render without a perceived hang.
+		</p>
+		<CodeBlock code={idleSample} language="tsx" filename="streaming-idle.tsx" />
+		<Callout type="tip" title="When idleMs helps">
+			Bursty streams (LLM tokens, server-initiated stream-end without an
+			explicit terminator). Steady-rate feeds (price ticks at a constant
+			cadence) do not need it; the next tick will flush in time.
+		</Callout>
 	</ContentSection>
 
 	<ContentSection label="What it does NOT do">

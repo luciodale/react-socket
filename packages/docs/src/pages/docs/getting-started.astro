@@ -30,8 +30,8 @@ export const prerender = true;
 			react socket takes that layer off your plate. You define your message
 			types, wire up a few extractors, and the library handles socket
 			lifecycle, reconnection, keep alive, subscription management, and in
-			flight tracking. Five React hooks give you everything you need at the
-			call site. No message switch, no imperative glue.
+			flight tracking. Ten React hooks, one job each, give you everything
+			you need at the call site. No message switch, no imperative glue.
 		</p>
 	</ContentSection>
 
@@ -177,27 +177,70 @@ const state = useSocketConnectionState(manager);`}
 			acknowledged sends with optimistic UI, refetch after reconnect,
 			store eviction, and more.
 		</p>
+		<Callout type="tip" title="Doing subscriptions? Wire two extractors">
+			<p>
+				The moment you call
+				<InlineCode>useSocketSubscription</InlineCode>, the manager needs
+				to know <strong>(a)</strong> when an inbound message confirms a
+				subscribe (so "joining..." UI clears) and <strong>(b)</strong>
+				when an inbound message acks an in-flight send (so optimistic UI
+				flips to "sent"). Both are one-line extractors on the manager
+				config:
+			</p>
+			<CodeBlock
+				code={`new WebSocketManager<TClientMsg, TServerMsg>({
+  url: "wss://...",
+  serialize: JSON.stringify,
+  deserialize: (raw) => JSON.parse(raw),
+
+  // (a) Server confirms a subscribe: clear "joining..." for that key.
+  getSubscriptionResolvedKey: (msg) =>
+    msg.type === "joined" ? msg.roomId : undefined,
+
+  // (b) Server acks a tracked send: drop it from in-flight tracking.
+  getAckId: (msg) =>
+    msg.type === "delivered" ? msg.ackId : undefined,
+});`}
+				language="tsx"
+				filename="manager.ts"
+			/>
+			<p>
+				Without these, the library has no way to know your protocol's
+				resolution shape — symptoms are "joining..." stuck forever and
+				optimistic messages stuck pending. See <a href={href("/docs/configuration")} class="text-accent hover:underline">Configuration</a>
+				for the full list.
+			</p>
+		</Callout>
 	</ContentSection>
 
-	<ContentSection label="Two layers: callback config and hook wrappers">
+	<ContentSection label="Two ways to observe lifecycle events">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			Every lifecycle moment (a send goes out, an in flight batch drops,
 			the socket becomes ready, a ref count hits zero, connection state
-			changes) can be observed two ways. They are additive, so both fire
-			for the same event if both are wired.
+			changes) can be observed two ways. The hooks are the primary
+			surface; the listener methods on the manager are escape hatches for
+			non React consumers.
 		</p>
 		<ul class="list-disc list-inside space-y-2 text-white/60 mb-4">
 			<li>
-				<strong class="text-white/80">Config callbacks</strong> on
-				<InlineCode>new WebSocketManager({"{ onSendIntent, onInFlightDrop, onReady, onLastUnsubscribe, onConnectionStateChange }"})</InlineCode> — declared once at the construction site, fire before any listeners. Good for transport level plumbing and non React consumers.
-			</li>
-			<li>
-				<strong class="text-white/80">Hook wrappers</strong>
+				<strong class="text-white/80">Hooks</strong>
 				(<InlineCode>useSocketSendIntent</InlineCode>,
 				<InlineCode>useSocketInFlightDrop</InlineCode>,
 				<InlineCode>useSocketReady</InlineCode>,
 				<InlineCode>useSocketLastUnsubscribe</InlineCode>,
-				<InlineCode>useSocketConnectionState</InlineCode>) — mount on any component, auto cleanup on unmount, latest handler without resubscribing. Good for feature scoped bridges and UI that reacts to socket events.
+				<InlineCode>useSocketConnectionState</InlineCode>) — mount on any component, auto cleanup on unmount, latest handler without resubscribing. The default for React UI.
+			</li>
+			<li>
+				<strong class="text-white/80">Listener methods</strong>
+				(<InlineCode>manager.addSendIntentListener</InlineCode>,
+				<InlineCode>addInFlightDropListener</InlineCode>,
+				<InlineCode>addReadyListener</InlineCode>,
+				<InlineCode>addLastUnsubscribeListener</InlineCode>,
+				<InlineCode>subscribeToConnectionState</InlineCode>) — same payloads, returned from the manager. Use from workers, node scripts, tests, or non React consumers. Each returns an unsubscribe fn.
+			</li>
+			<li>
+				<strong class="text-white/80">Construction-time callbacks</strong>
+				on <InlineCode>new WebSocketManager({"{ onReady, onDebug }"})</InlineCode> — only these two. Use when you need a handler that fires during manager bootstrap, before any component has mounted.
 			</li>
 		</ul>
 		<Callout type="tip" title="React app? Reach for the hooks first">
@@ -205,9 +248,8 @@ const state = useSocketConnectionState(manager);`}
 			failure handling, and refetch logic next to the components that own
 			the domain makes the intent obvious and keeps the manager
 			construction site free of app state coupling. Fall back to the
-			config callback when you are outside React (workers, node scripts,
-			tests) or when the handler needs to fire during manager bootstrap
-			before any component has mounted.
+			listener methods or the construction-time
+			<InlineCode>onReady</InlineCode> when you are outside React.
 		</Callout>
 	</ContentSection>
 

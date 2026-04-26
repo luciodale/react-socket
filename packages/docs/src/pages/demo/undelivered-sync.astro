@@ -8,20 +8,23 @@ import DocsPage from "../../layouts/DocsPage.astro";
 export const prerender = true;
 ---
 
-<DocsPage title="Undelivered Sync" description="Demonstrates message persistence: send messages, disconnect, and retry them manually when ready.">
-	<ContentSection label="Undelivered Sync">
+<DocsPage title="Space message persistence" description="Send messages into a Space, lose the connection mid-flight, retry on reconnect. localStorage holds the failed messages so nothing gets lost.">
+	<ContentSection label="Space message persistence">
 		<p class="text-white/60 mb-6 leading-relaxed">
-			This demo shows what happens when you send messages while disconnected.
-			Messages are saved to localStorage and marked as failed. You decide when
-			to retry them by clicking the retry button next to each message.
+			Real Spaces stay open all day. Connections drop on commute, on
+			train Wi-Fi, when laptops sleep. The user expects every message
+			they typed to land — eventually. This demo shows the full
+			round-trip: optimistic insert on send, mark in-flight, ack, drop
+			on disconnect, persist to localStorage, retry on reconnect.
 		</p>
 	</ContentSection>
 
 	<ContentSection label="Live Demo">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Hit <strong class="text-white/80">Disconnect</strong>, send a few messages (they'll
-			be saved immediately), then hit <strong class="text-white/80">Reconnect</strong>.
-			Failed messages show a retry button. Click it to resend:
+			Hit <strong class="text-white/80">Disconnect</strong>, send a few
+			messages (they'll be saved immediately), then hit
+			<strong class="text-white/80">Reconnect</strong>. Failed messages
+			show a retry button. Click it to resend:
 			<InlineCode>failed</InlineCode> &rarr;
 			<InlineCode>retrying</InlineCode> &rarr;
 			<InlineCode>delivered</InlineCode>.
@@ -29,10 +32,10 @@ export const prerender = true;
 		<UndeliveredSync client:load />
 	</ContentSection>
 
-	<ContentSection label="Persistence Setup">
+	<ContentSection label="Persistence setup">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Create an undelivered store backed by localStorage. Messages are keyed by
-			channel and deduplicated by ID:
+			Create an undelivered store backed by localStorage. Messages are
+			keyed by channel and deduplicated by id.
 		</p>
 		<CodeBlock
 			code={`import {
@@ -54,68 +57,125 @@ await undelivered.init();`}
 		/>
 	</ContentSection>
 
-	<ContentSection label="Saving Undelivered Messages">
+	<ContentSection label="Manager setup">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Messages can fail to deliver in two ways. If the connection drops mid-send,
-			<InlineCode>onInFlightDrop</InlineCode> fires and you save
-			the dropped messages. If the user sends while already disconnected,
-			<InlineCode>send()</InlineCode> returns
-			<InlineCode>false</InlineCode> and you save immediately:
+			One extractor for ack resolution. All other lifecycle logic lives in
+			hooks.
 		</p>
 		<CodeBlock
-			code={`// Path 1: connection drops while messages are in-flight
-onInFlightDrop(messages) {
-  for (const { id, data } of messages) {
-    if (data.action === "message") {
-      undelivered.addMessage(data.channel, {
-        id,
-        channel: data.channel,
-        text: data.text,
-      });
-    }
-  }
-}
+			code={`const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  url: getWsUrl(),
+  serialize: (msg) => JSON.stringify(msg),
+  deserialize: (raw) => JSON.parse(raw) as TServerMsg,
 
-// Path 2: user sends while already disconnected
-function handleSend(channel: string, text: string) {
-  const id = crypto.randomUUID();
-  const sent = manager.send({
-    data: { action: "message", id, channel, text },
-    ackId: id,
+  ping: () => ({ type: "ping" }),
+  isPong: (msg) => msg.type === "pong",
+
+  getAckId: (msg) => (msg.type === "delivered" ? msg.ackId : undefined),
+});`}
+			language="tsx"
+			filename="UndeliveredSync.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Optimistic bridge">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			<InlineCode>useSocketSendIntent</InlineCode> fires on every send,
+			even when offline — insert the optimistic record here.
+			<InlineCode>useSocketInFlightDrop</InlineCode> fires when the
+			connection drops before ack — persist to localStorage and mark
+			failed. One bridge component owns both.
+		</p>
+		<CodeBlock
+			code={`function OptimisticBridge() {
+  useSocketSendIntent(manager, ({ data, ackId }) => {
+    if (data.type !== "message" || !ackId) return;
+    useStore.setState((s) => {
+      const exists = s.messages.some((m) => m.id === ackId);
+      if (exists) {
+        return {
+          messages: s.messages.map((m) =>
+            m.id === ackId ? { ...m, status: "retrying" } : m,
+          ),
+        };
+      }
+      return {
+        messages: [
+          ...s.messages,
+          { id: ackId, sender: "you", text: data.text, status: "sending" },
+        ],
+      };
+    });
   });
-  if (!sent) {
-    undelivered.addMessage(channel, { id, channel, text });
-  }
+
+  useSocketInFlightDrop(manager, (messages) => {
+    for (const { id, data } of messages) {
+      if (data.type === "message") {
+        undelivered.addMessage(data.channel, {
+          id,
+          channel: data.channel,
+          text: data.text,
+        });
+      }
+    }
+    const droppedIds = new Set(messages.map((m) => m.id));
+    useStore.setState((s) => ({
+      messages: s.messages.map((m) =>
+        droppedIds.has(m.id) ? { ...m, status: "failed" } : m,
+      ),
+    }));
+  });
+
+  return null;
 }`}
 			language="tsx"
 			filename="UndeliveredSync.tsx"
 		/>
 	</ContentSection>
 
-	<ContentSection label="Manual Retry">
+	<ContentSection label="Delivered bridge">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Failed messages stay visible with a retry button. When the user clicks it,
-			you resend the message through the manager. If the connection is back up,
-			the message transitions through
-			<InlineCode>retrying</InlineCode> &rarr;
-			<InlineCode>delivered</InlineCode>:
+			When the server confirms, remove from localStorage and flip the UI
+			status to delivered.
+		</p>
+		<CodeBlock
+			code={`function DeliveredBridge() {
+  useSocketEvent(manager, "delivered", (msg) => {
+    undelivered.removeMessage(CHANNEL, msg.ackId);
+    useStore.setState((s) => ({
+      messages: s.messages.map((m) =>
+        m.id === msg.ackId ? { ...m, status: "delivered" } : m,
+      ),
+    }));
+  });
+  return null;
+}`}
+			language="tsx"
+			filename="UndeliveredSync.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Manual retry">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Failed messages stay visible with a retry button. Retry through
+			<InlineCode>useSocketSend</InlineCode>. If the socket is back up,
+			the message transitions <InlineCode>retrying</InlineCode> &rarr;
+			<InlineCode>delivered</InlineCode> via the bridges above.
 		</p>
 		<CodeBlock
 			code={`function handleRetry(id: string, text: string) {
-  const sent = manager.send({
-    data: { action: "message", id, channel: "demo", text },
-    ackId: id,
-  });
+  const sent = send({ type: "message", id, channel: CHANNEL, text }, id);
   if (!sent) {
-    // Still disconnected, keep it as failed
+    // still disconnected — stays as failed
   }
 }
 
-// When the server confirms, clean up:
-onMessageReceived(msg) {
-  if (msg.action === "message") {
-    manager.ackInFlight(msg.id);
-    undelivered.removeMessage(msg.channel, msg.id);
+// Offline send path: library returns false, store immediately
+function handleSend(text: string) {
+  const id = crypto.randomUUID();
+  const sent = send({ type: "message", id, channel: CHANNEL, text }, id);
+  if (!sent) {
+    undelivered.addMessage(CHANNEL, { id, channel: CHANNEL, text });
   }
 }`}
 			language="tsx"

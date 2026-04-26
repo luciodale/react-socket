@@ -139,6 +139,15 @@ manager.dispose();`}
 			language="tsx"
 			filename="useSocketEventBatch.tsx"
 		/>
+		<Callout type="warning" title="idleMs is not extra batching">
+			The optional <InlineCode>idleMs</InlineCode> flushes after a gap of
+			silence — useful for surfacing the tail of an LLM stream without
+			waiting the full <InlineCode>flushMs</InlineCode>. It is <strong>not</strong>
+			a throttle: a trickle of 2 events followed by a long pause flushes
+			after <InlineCode>idleMs</InlineCode>, not <InlineCode>flushMs</InlineCode>.
+			If your goal is "render at most every X ms regardless of activity,"
+			omit <InlineCode>idleMs</InlineCode>.
+		</Callout>
 	</ContentSection>
 
 	<ContentSection label="useSocketSubscription">
@@ -422,6 +431,8 @@ await undelivered.init();`}
 | reconnect-scheduled           | { attempt, delayMs }                    |
 | ready                         | { restoredKeys }                        |
 | deserialize-error             | { raw, error }                          |
+| url-resolve-error             | { error }                               |
+| transport-error               | —                                       |
 | dispose                       | —                                       |`}
 			language="text"
 			filename="debug-events"

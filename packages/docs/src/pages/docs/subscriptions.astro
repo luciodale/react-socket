@@ -12,185 +12,206 @@ export const prerender = true;
 <DocsPage title="Subscriptions">
 	<ContentSection label="Subscriptions">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Subscriptions are one of the most powerful patterns in WebSocket communication.
-			You send a message to the server saying "I'm interested in this data," and the
-			server pushes updates to you over time. Think of it like tuning into a radio
-			channel — you subscribe once, and the updates keep flowing.
-		</p>
-		<p class="text-white/60 leading-relaxed">
-			react-socket makes subscriptions safe and efficient. Multiple components can
-			subscribe to the same channel and only one message is sent to the server.
-			When the last component unmounts, the unsubscribe is sent automatically.
-			No duplicate messages, no leaked subscriptions, no manual bookkeeping.
+			Subscriptions tell the server "I want updates on this stream." The
+			library ref counts internally so ten components can all mount a
+			<InlineCode>useSocketSubscription</InlineCode> for the same key and
+			only one message hits the server. When the last consumer unmounts,
+			the unsubscribe fires automatically. After a reconnect, every active
+			subscription is restored transparently.
 		</p>
 	</ContentSection>
 
-	<ContentSection label="The Problem Without Deduplication">
+	<ContentSection label="The hook">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Imagine three components all need live price data for the same stock ticker.
-			Without deduplication, each component sends its own subscribe message — the
-			server sees three identical requests, allocates three sets of resources, and
-			pushes three copies of every update. When components unmount and remount
-			(React strict mode, navigation, dynamic lists), it gets worse.
+			<InlineCode>useSocketSubscription</InlineCode> owns the lifecycle.
+			The <InlineCode>key</InlineCode> is the ref counted identifier. The
+			<InlineCode>subscribe</InlineCode> and
+			<InlineCode>unsubscribe</InlineCode> payloads are typed against
+			<InlineCode>TClientMsg</InlineCode>.
 		</p>
-		<p class="text-white/60 leading-relaxed">
-			react-socket solves this with ref-counting. The first component to subscribe
-			sends the message. The second and third just increment a counter. Unsubscribes
-			decrement it. Only when the counter hits zero does the actual unsubscribe go
-			out to the server.
-		</p>
+		<CodeBlock
+			code={`useSocketSubscription(manager, {
+  key: "chat:general",
+  subscribe: { type: "subscribe", channel: "general" },
+  unsubscribe: { type: "unsubscribe", channel: "general" },
+});`}
+			language="tsx"
+			filename="basic.tsx"
+		/>
 	</ContentSection>
 
-	<ContentSection label="How It Works">
+	<ContentSection label="Pin the key + payloads in a custom hook (recommended)">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Each subscription is identified by a <InlineCode>key</InlineCode> string
-			that you choose (e.g. <InlineCode>"prices:AAPL"</InlineCode> or
-			<InlineCode>"chat:general"</InlineCode>). The manager keeps an internal
-			counter for each key:
+			Don't call <InlineCode>useSocketSubscription</InlineCode> directly from
+			feature components. Wrap it once per resource — same file as the
+			resource's protocol — and have every consumer use the wrapper. The
+			<InlineCode>key</InlineCode>, the
+			<InlineCode>subscribe</InlineCode> payload, and the
+			<InlineCode>unsubscribe</InlineCode> payload all derive from the same
+			input, so it is impossible for two call sites to drift apart.
 		</p>
-		<ul class="list-disc list-inside space-y-2 text-white/60 mb-4">
-			<li>First <InlineCode>subscribe("chat:general")</InlineCode> — counter goes to 1, message sent to server</li>
-			<li>Second call with the same key — counter goes to 2, no message sent</li>
-			<li>First <InlineCode>unsubscribe("chat:general")</InlineCode> — counter drops to 1, no message sent</li>
-			<li>Last unsubscribe — counter drops to 0, unsubscribe message sent to server</li>
-		</ul>
-		<Callout type="tip" title="Strict Mode Safe">
-			React strict mode fires effects twice in development. Ref-counting handles
-			this correctly: the counter goes 0 &rarr; 1 &rarr; 0 &rarr; 1, and only one
-			subscribe message is ever sent to the server.
+		<CodeBlock
+			code={`// hooks/useSpaceSubscription.ts
+import { useSocketSubscription } from "@luciodale/react-socket";
+import { manager } from "../socket/manager";
+
+export function useSpaceSubscription(spaceId: string | null) {
+  useSocketSubscription(manager, {
+    key: spaceId ?? "",
+    enabled: spaceId !== null,
+    subscribe: spaceId
+      ? { type: "subscribe", channel: spaceId }
+      : undefined,
+    unsubscribe: spaceId
+      ? { type: "unsubscribe", channel: spaceId }
+      : undefined,
+  });
+}`}
+			language="tsx"
+			filename="hooks/useSpaceSubscription.ts"
+		/>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			Now every consumer is a one-liner that cannot get the params wrong:
+		</p>
+		<CodeBlock
+			code={`function SpaceHeader({ spaceId }: { spaceId: string }) {
+  useSpaceSubscription(spaceId);
+  // ...
+}
+
+function MessageList({ spaceId }: { spaceId: string }) {
+  useSpaceSubscription(spaceId);
+  // ...
+}`}
+			language="tsx"
+			filename="components.tsx"
+		/>
+		<Callout type="tip" title="Why this matters">
+			The library has first-payload-wins semantics: if two components
+			subscribe with the same key but different payloads, only the first
+			one is sent and replayed on reconnect. Wrapping in a custom hook
+			removes the entire class of bug — the payload is computed in one
+			place, the same way, every time.
 		</Callout>
 	</ContentSection>
 
-	<ContentSection label="Subscribing and Unsubscribing">
+	<ContentSection label="Ref counting in action">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Pass a unique key and an optional message to send to the server.
-			The <InlineCode>data</InlineCode> argument is stored internally and reused
-			to re-subscribe after a reconnect:
+			Render the same hook twice in one tree. Only one subscribe hits the
+			server; only one unsubscribe fires when both unmount.
 		</p>
 		<CodeBlock
-			code={`// Subscribe — sends the message on first subscriber only
-manager.subscribe(
-  "chat:general",
-  { action: "subscribe", type: "channel", channel: "general" }
-);
+			code={`function PriceBadge({ ticker }: { ticker: string }) {
+  useSocketSubscription(manager, {
+    key: \`price:\${ticker}\`,
+    subscribe: { type: "subscribe", channel: ticker },
+    unsubscribe: { type: "unsubscribe", channel: ticker },
+  });
+  const price = usePriceStore((s) => s.prices[ticker]);
+  return <span>{price}</span>;
+}
 
-// Unsubscribe — sends only when the last subscriber leaves
-manager.unsubscribe(
-  "chat:general",
-  { action: "unsubscribe", type: "channel", channel: "general" }
-);`}
+// Renders N copies → 1 subscribe on the wire, N readers on the store.
+<List>
+  {tickers.map((t) => <PriceBadge key={t} ticker={t} />)}
+</List>`}
 			language="tsx"
-			filename="subscriptions.ts"
+			filename="PriceBadge.tsx"
 		/>
 	</ContentSection>
 
-	<ContentSection label="Using in React Components">
+	<ContentSection label="Reading the stream">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			The natural place to subscribe is a <InlineCode>useEffect</InlineCode>.
-			Return the unsubscribe as cleanup. Because of ref-counting, you don't need to
-			worry about multiple instances of the same component or strict mode double-firing:
+			<InlineCode>useSocketSubscription</InlineCode> manages the server
+			side stream. Reading is a separate concern. For streams consumed by
+			many components, pair with a single
+			<InlineCode>useSocketEvent</InlineCode> bridge that writes into a
+			zustand store. See the <a href={href("/docs/patterns")} class="text-accent hover:underline">rendered state from a stream</a> pattern.
 		</p>
 		<CodeBlock
-			code={`import { useEffect } from "react";
-
-function ChatRoom({ channel }: { channel: string }) {
-  useEffect(() => {
-    manager.subscribe(
-      \`chat:\${channel}\`,
-      { action: "subscribe", type: "channel", channel }
-    );
-
-    return () => {
-      manager.unsubscribe(
-        \`chat:\${channel}\`,
-        { action: "unsubscribe", type: "channel", channel }
-      );
-    };
-  }, [channel]);
-
-  // Messages arrive via onMessageReceived in the manager
-  // and get dispatched to your store — this component just reads from it
-  const messages = useStore((s) => s.messages[channel] ?? []);
-
-  return (
-    <ul>
-      {messages.map((m) => <li key={m.id}>{m.sender}: {m.text}</li>)}
-    </ul>
-  );
+			code={`// One bridge, shared by all consumers
+function PriceBridge() {
+  useSocketEvent(manager, "price", (msg) => {
+    usePriceStore.getState().set(msg.ticker, msg.value);
+  });
+  return null;
 }`}
 			language="tsx"
-			filename="ChatRoom.tsx"
+			filename="PriceBridge.tsx"
 		/>
-		<p class="text-white/60 mt-4 leading-relaxed">
-			If <InlineCode>ChatRoom</InlineCode> is rendered five times on the page
-			with the same channel, only one subscribe message is sent to the server.
-			All five components read from the same store, updated by the single
-			<InlineCode>onMessageReceived</InlineCode> callback.
-		</p>
 	</ContentSection>
 
-	<ContentSection label="Pending Subscriptions">
+	<ContentSection label="Joining state">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			When a subscribe message is sent, the key is marked as "pending" until you
-			explicitly resolve it. This prevents the manager from re-sending if the
-			component re-renders before the server confirms:
+			Most servers ack a subscribe with a confirmation message. Wire
+			<InlineCode>getSubscriptionResolvedKey</InlineCode> in the manager
+			config so the library clears the pending marker automatically, then
+			read it with <InlineCode>useSocketPendingSubscription</InlineCode>.
 		</p>
 		<CodeBlock
-			code={`// In your onMessageReceived dispatcher:
-onMessageReceived(msg) {
-  if (msg.action === "subscribe_ack") {
-    manager.resolvePendingSubscription(\`chat:\${msg.channel}\`);
-  }
+			code={`// manager config
+{
+  getSubscriptionResolvedKey: (msg) =>
+    msg.type === "subscribe-ack" ? msg.channel : undefined,
 }`}
 			language="tsx"
 			filename="manager.ts"
 		/>
-	</ContentSection>
-
-	<ContentSection label="Automatic Restoration on Reconnect">
-		<p class="text-white/60 mb-4 leading-relaxed">
-			When the connection drops and reconnects, the manager automatically re-sends
-			all active subscriptions using the stored <InlineCode>data</InlineCode>
-			payload. Your components don't need to do anything — they stay mounted, the
-			manager handles re-subscribing, and messages resume flowing.
-		</p>
-		<p class="text-white/60 leading-relaxed">
-			The <InlineCode>onReady</InlineCode> callback fires after subscriptions
-			have been restored.
-			See <a href={href("/docs/reconnection")} class="text-accent hover:underline">Reconnection</a> for more.
-		</p>
-	</ContentSection>
-
-	<ContentSection label="Cleanup with onLastUnsubscribe">
-		<p class="text-white/60 mb-4 leading-relaxed">
-			When the ref count for a key drops to zero, the
-			<InlineCode>onLastUnsubscribe</InlineCode> callback fires. Use it to
-			clean up related state — for example, clearing cached messages for a channel
-			the user has fully navigated away from:
-		</p>
 		<CodeBlock
-			code={`const manager = new WebSocketManager<TClientMsg, TServerMsg>({
-  // ...
-  onLastUnsubscribe(key, data) {
-    // No more components are listening to this channel
-    store.clearChannel(key);
-  },
-});`}
+			code={`function Room({ id }: { id: string }) {
+  useSocketSubscription(manager, {
+    key: id,
+    subscribe: { type: "subscribe", channel: id },
+    unsubscribe: { type: "unsubscribe", channel: id },
+  });
+
+  const joining = useSocketPendingSubscription(manager, id);
+  if (joining) return <span>joining...</span>;
+  return <MessageList roomId={id} />;
+}`}
 			language="tsx"
-			filename="manager.ts"
+			filename="Room.tsx"
 		/>
 	</ContentSection>
 
-	<ContentSection label="Next Steps">
+	<ContentSection label="Restoration on reconnect">
+		<Callout type="info">
+			When the connection drops and comes back, every active subscription
+			is replayed to the server using the stored
+			<InlineCode>subscribe</InlineCode> payload. Consumers do not need to
+			do anything. The pending marker briefly flips back to true during
+			restoration, so <InlineCode>useSocketPendingSubscription</InlineCode>
+			reflects reality even across reconnects.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Subscribe only, no read">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Sometimes a component needs the server to keep a stream alive but
+			does not render from it (presence keepalive, typing indicator host).
+			That is fine — subscribing and reading are independent.
+		</p>
+		<CodeBlock
+			code={`function PresenceKeepalive() {
+  useSocketSubscription(manager, {
+    key: "presence",
+    subscribe: { type: "sub-presence" },
+    unsubscribe: { type: "unsub-presence" },
+  });
+  return null;
+}`}
+			language="tsx"
+			filename="PresenceKeepalive.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Next">
 		<ul class="space-y-2 text-white/60">
 			<li>
-				<a href={href("/docs/optimistic-updates")} class="text-accent hover:underline">Sending Messages</a> — fire-and-forget and acknowledged sends
+				<a href={href("/docs/patterns")} class="text-accent hover:underline">Patterns</a> — history, optimistic sends, composition
 			</li>
 			<li>
-				<a href={href("/docs/reconnection")} class="text-accent hover:underline">Reconnection</a> — how subscriptions survive disconnects
-			</li>
-			<li>
-				<a href={href("/docs/api")} class="text-accent hover:underline">API Reference</a> — full method list
+				<a href={href("/docs/api")} class="text-accent hover:underline">API Reference</a>
 			</li>
 		</ul>
 	</ContentSection>

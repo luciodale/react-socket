@@ -186,7 +186,7 @@ const broadcastSample = `// socket.io rooms are server-side groupings the server
 			<li>Move auth out of <InlineCode>{"io(url, { auth })"}</InlineCode>. Pick a strategy from the <a href={href("/docs/auth")} class="text-accent hover:underline">Authentication</a> guide; first-message is the closest to Socket.IO's auth handshake.</li>
 			<li>Translate ack callbacks. Add <InlineCode>getAckId</InlineCode> to the config and a <InlineCode>delivered</InlineCode> server variant. Replace each <InlineCode>emit(..., cb)</InlineCode> with a paired <InlineCode>send + useSocketEvent("delivered")</InlineCode>.</li>
 			<li>Replace room joins with <InlineCode>useSocketSubscription</InlineCode>. The component owns the lifecycle; the library ref counts.</li>
-			<li>If you used multiple namespaces, decide whether you really need multiple managers. Most cases collapse into one. See <a href={href("/demo/multi-connection")} class="text-accent hover:underline">Multiple connections</a> if you do.</li>
+			<li>If you used multiple namespaces, decide whether you really need multiple managers. Most cases collapse into one. If you do need separate sockets (different lifecycles, different auth), instantiate two managers and wire them independently — there is nothing in the library that pins you to one.</li>
 			<li>Wire <InlineCode>useSocketInFlightDrop</InlineCode> to your retry / failed UI. Socket.IO's volatile vs reliable distinction maps to whether you set <InlineCode>ackId</InlineCode>.</li>
 		</ol>
 	</ContentSection>

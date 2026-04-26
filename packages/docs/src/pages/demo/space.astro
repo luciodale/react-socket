@@ -1,0 +1,135 @@
+---
+import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
+import { Space } from "../../components/demos/Space";
+import DocsPage from "../../layouts/DocsPage.astro";
+import { href } from "../../lib/link";
+
+export const prerender = true;
+---
+
+<DocsPage title="Space" description="Multi-actor collaborative space: humans + agents in one channel, with presence and typing indicators. Subscriptions, ack, presence, typing — all in ~250 lines.">
+	<ContentSection label="Space">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			A <em>Space</em> is the surface where teammates and agents
+			collaborate side by side: shared context, shared documents, shared
+			conversation. This demo strips it to the realtime essentials:
+			messages, presence, typing.
+		</p>
+		<ul class="list-disc list-inside space-y-2 text-white/60 mb-4">
+			<li>
+				<strong class="text-white/80">Subscriptions</strong> — every component
+				that needs space data calls one centralised hook. The library
+				ref counts; one wire frame regardless of how many components
+				render.
+			</li>
+			<li>
+				<strong class="text-white/80">Acked sends</strong> — every message
+				carries an ack id so the library can clear in-flight tracking
+				when the server confirms.
+			</li>
+			<li>
+				<strong class="text-white/80">Presence + typing</strong> — secondary
+				signals routed through the same wire, written into separate
+				store slices. Components subscribe to whichever slice they
+				render.
+			</li>
+		</ul>
+	</ContentSection>
+
+	<ContentSection label="Live demo">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Switch spaces to see joining state. Type to trigger Ada's typing
+			indicator. Send to get Orion's reply. Try opening this page in
+			multiple tabs — each is a fresh client; the same wire patterns
+			apply.
+		</p>
+		<Space client:load />
+	</ContentSection>
+
+	<ContentSection label="Centralised subscription hook">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Every consumer in the Space tree uses one hook. The
+			<InlineCode>key</InlineCode>, <InlineCode>subscribe</InlineCode> payload,
+			and <InlineCode>unsubscribe</InlineCode> payload all derive from the
+			same <InlineCode>spaceId</InlineCode> argument — impossible for two
+			callers to drift on params.
+		</p>
+		<CodeBlock
+			code={`function useSpaceSubscription(spaceId: string) {
+  useSocketSubscription(manager, {
+    key: spaceId,
+    subscribe: { type: "subscribe", channel: spaceId },
+    unsubscribe: { type: "unsubscribe", channel: spaceId },
+  });
+}`}
+			language="tsx"
+			filename="useSpaceSubscription.ts"
+		/>
+		<Callout type="tip" title="First-payload wins">
+			The library only sends the first subscriber's payload on the wire,
+			and replays that same payload on reconnect. If two siblings disagree
+			on params, the disagreement is silent. Wrapping in a custom hook
+			makes drift impossible.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Three signals, one bridge">
+		<CodeBlock
+			code={`function SpaceBridge() {
+  useSocketEvent(manager, "chat", (msg) => {
+    appendMessage(msg.channel, {
+      id: msg.id,
+      sender: msg.sender,
+      senderKind: msg.senderKind,
+      text: msg.text,
+    });
+  });
+  useSocketEvent(manager, "presence", (msg) => {
+    setPresence(msg.channel, msg.members);
+  });
+  useSocketEvent(manager, "typing", (msg) => {
+    setTyping(msg.channel, msg.userId, msg.name, msg.active);
+  });
+  return null;
+}`}
+			language="tsx"
+			filename="SpaceBridge.tsx"
+		/>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			Mounted once at the root of the Space tree. The bridge only writes
+			to the store; reads happen in the components that render each
+			slice. Tokens streaming in does not re-render the presence pill row.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Composing reads">
+		<CodeBlock
+			code={`function useSpace(spaceId: string) {
+  useSpaceSubscription(spaceId);
+  const joining = useSocketPendingSubscription(manager, spaceId);
+  const messages = useStore((s) => s.messages[spaceId] ?? EMPTY_MESSAGES);
+  const presence = useStore((s) => s.presence[spaceId] ?? EMPTY_MEMBERS);
+  const typing = useStore((s) => s.typing[spaceId] ?? EMPTY_TYPING);
+  return { joining, messages, presence, typing };
+}`}
+			language="tsx"
+			filename="useSpace.ts"
+		/>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			The <InlineCode>EMPTY_*</InlineCode> stable references are the
+			only zustand-with-React subtlety: same identity every render, so
+			downstream <InlineCode>useEffect</InlineCode>s and memos stay
+			stable while the channel is empty.
+		</p>
+	</ContentSection>
+
+	<p class="text-white/60 mt-6 leading-relaxed">
+		See <a href={href("/docs/subscriptions")} class="text-accent hover:underline">Subscriptions</a>
+		for the full ref-count + reconnect story, and
+		<a href={href("/demo/undelivered-sync")} class="text-accent hover:underline"> Persistence</a>
+		for what happens to a Space message when the socket drops mid-flight.
+	</p>
+</DocsPage>

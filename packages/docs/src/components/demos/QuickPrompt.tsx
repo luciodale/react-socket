@@ -9,17 +9,25 @@ import { getWsUrl } from "../../lib/ws-url";
 
 // ── Protocol ────────────────────────────────────────────────────────
 
-type TClientMsg = { type: "echo"; text: string };
-type TServerMsg = { type: "echo"; text: string };
+type TClientMsg = { type: "quick-ask"; id: string; prompt: string };
 
-// ── Component ───────────────────────────────────────────────────────
+type TServerMsg = {
+	type: "chat";
+	id: string;
+	channel: string;
+	sender: string;
+	senderKind: "human" | "agent";
+	text: string;
+};
 
 type TEntry =
 	| { id: string; kind: "you"; text: string }
-	| { id: string; kind: "server"; text: string }
+	| { id: string; kind: "assistant"; text: string }
 	| { id: string; kind: "not-sent"; text: string };
 
-export function FireAndForget() {
+// ── Component ───────────────────────────────────────────────────────
+
+export function QuickPrompt() {
 	const [input, setInput] = useState("");
 	const [messages, setMessages] = useState<TEntry[]>([]);
 
@@ -38,10 +46,10 @@ export function FireAndForget() {
 		return () => manager.disconnect();
 	}, [manager]);
 
-	useSocketEvent(manager, "echo", (msg) => {
+	useSocketEvent(manager, "chat", (msg) => {
 		setMessages((prev) => [
 			...prev,
-			{ id: crypto.randomUUID(), kind: "server", text: msg.text },
+			{ id: msg.id, kind: "assistant", text: msg.text },
 		]);
 	});
 
@@ -52,14 +60,11 @@ export function FireAndForget() {
 	function handleSend() {
 		if (!input.trim()) return;
 		const text = input.trim();
-		const ok = send({ type: "echo", text });
+		const id = crypto.randomUUID();
+		const ok = send({ type: "quick-ask", id, prompt: text });
 		setMessages((prev) => [
 			...prev,
-			{
-				id: crypto.randomUUID(),
-				kind: ok ? "you" : "not-sent",
-				text,
-			},
+			{ id, kind: ok ? "you" : "not-sent", text },
 		]);
 		setInput("");
 	}
@@ -67,14 +72,15 @@ export function FireAndForget() {
 	return (
 		<div className="rounded-lg border border-white/10 bg-white/[0.02] p-4">
 			<div className="mb-3 flex items-center gap-2">
-				<h3 className="text-lg font-semibold text-white">Echo</h3>
+				<h3 className="text-lg font-semibold text-white">Quick prompt</h3>
 				<span className="text-xs text-white/40">{state}</span>
 			</div>
 
 			<div className="mb-3 min-h-[120px] max-h-[240px] overflow-y-auto rounded bg-black/40 p-3">
 				{messages.length === 0 && (
 					<p className="text-sm text-white/30">
-						Send a message to see the echo.
+						Ask the assistant something. The reply lands as a single message (no
+						streaming, no tracking).
 					</p>
 				)}
 				{messages.map((m) => (
@@ -85,9 +91,14 @@ export function FireAndForget() {
 								<span className="line-through">{m.text}</span>
 								<span className="ml-2 text-xs text-rose-400/70">(offline)</span>
 							</>
+						) : m.kind === "you" ? (
+							<>
+								<span className="font-semibold text-white/90">you:</span>{" "}
+								{m.text}
+							</>
 						) : (
 							<>
-								<span className="font-semibold text-white/90">{m.kind}:</span>{" "}
+								<span className="font-semibold text-accent">assistant:</span>{" "}
 								{m.text}
 							</>
 						)}
@@ -101,7 +112,7 @@ export function FireAndForget() {
 					onChange={(e) => setInput(e.target.value)}
 					onKeyDown={(e) => e.key === "Enter" && handleSend()}
 					placeholder={
-						connected ? "Type something..." : "Offline — reconnecting..."
+						connected ? "Ask anything..." : "Offline — reconnecting..."
 					}
 					className="flex-1 rounded border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 outline-none focus:border-accent"
 				/>
@@ -116,7 +127,7 @@ export function FireAndForget() {
 
 			{!connected && (
 				<p className="mt-2 text-xs text-rose-400/80">
-					You are offline. Messages you send now will be marked as not sent.
+					You are offline. Prompts you send now will be marked as not sent.
 				</p>
 			)}
 		</div>

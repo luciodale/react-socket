@@ -48,12 +48,27 @@ export function useSocketEvent<
 }
 
 // ── useSocketEventBatch ──────────────────────────────────────────────
-//
-// Receive-side backpressure helper. Buffers events matching the given
-// discriminator value and flushes the batch to `handler` on a fixed
-// interval. Useful for high-frequency streams where calling setState
-// per event would tank UI performance.
 
+/**
+ * Receive-side backpressure helper. Buffers events matching `value` and
+ * flushes the batch to `handler` on a fixed `flushMs` interval. Use for
+ * high-frequency streams (LLM tokens, presence cursors, telemetry) where
+ * a setState per event would tank UI performance.
+ *
+ * **`idleMs` (optional)**: when set, also flushes after `idleMs` of
+ * silence on the channel. This avoids the trailing-latency artifact
+ * where the last 1–3 events of a stream sit in the buffer waiting for
+ * the next interval tick. Typical use: `flushMs: 16, idleMs: 8` for an
+ * LLM token stream so the final tokens render without a visible stall.
+ *
+ * **Do not use `idleMs` for pure throttling.** Every matching event
+ * resets the idle timer, so any gap longer than `idleMs` triggers an
+ * early flush — including a trickle of 2 events followed by silence,
+ * which will flush at `idleMs` rather than wait for `flushMs`. `idleMs`
+ * is an *opt-in to extra responsiveness on burst tails*, not extra
+ * batching. If your goal is "render at most every X ms regardless of
+ * activity," omit `idleMs` and rely on `flushMs` alone.
+ */
 export function useSocketEventBatch<
 	TKey extends string,
 	TServerMsg extends Record<TKey, string>,
@@ -62,37 +77,49 @@ export function useSocketEventBatch<
 	manager: TMessageSource<TServerMsg, TKey>,
 	value: TValue,
 	handler: (msgs: Array<Extract<TServerMsg, Record<TKey, TValue>>>) => void,
-	options: { flushMs: number },
+	options: { flushMs: number; idleMs?: number },
 ): void {
 	const handlerRef = useRef(handler);
 	handlerRef.current = handler;
 
-	const { flushMs } = options;
+	const { flushMs, idleMs } = options;
 
 	useEffect(() => {
 		const key = manager.discriminator;
 		const buffer: Array<Extract<TServerMsg, Record<TKey, TValue>>> = [];
+		let idleTimer: ReturnType<typeof setTimeout> | null = null;
 
-		const unsubscribe = manager.addMessageListener((msg) => {
-			if ((msg as Record<TKey, string>)[key] === value) {
-				buffer.push(msg as Extract<TServerMsg, Record<TKey, TValue>>);
+		const flush = () => {
+			if (idleTimer) {
+				clearTimeout(idleTimer);
+				idleTimer = null;
 			}
-		});
-
-		const timer = setInterval(() => {
 			if (buffer.length === 0) return;
 			// Snapshot, then clear in place (faster than reassigning to []).
 			const batch = buffer.slice();
 			buffer.length = 0;
 			handlerRef.current(batch);
-		}, flushMs);
+		};
+
+		const unsubscribe = manager.addMessageListener((msg) => {
+			if ((msg as Record<TKey, string>)[key] === value) {
+				buffer.push(msg as Extract<TServerMsg, Record<TKey, TValue>>);
+				if (idleMs !== undefined) {
+					if (idleTimer) clearTimeout(idleTimer);
+					idleTimer = setTimeout(flush, idleMs);
+				}
+			}
+		});
+
+		const timer = setInterval(flush, flushMs);
 
 		return () => {
 			unsubscribe();
 			clearInterval(timer);
+			if (idleTimer) clearTimeout(idleTimer);
 			buffer.length = 0;
 		};
-	}, [manager, value, flushMs]);
+	}, [manager, value, flushMs, idleMs]);
 }
 
 // ── useSocketSubscription ────────────────────────────────────────────
@@ -102,26 +129,72 @@ type TSubscribable<TClientMsg> = {
 	unsubscribe: (key: string, data?: TClientMsg) => void;
 };
 
+/**
+ * Declarative ref-counted subscription. The first mount for a given `key`
+ * triggers a single `subscribe` wire send; later mounts increment a
+ * counter without re-sending. Unmount decrements. The wire `unsubscribe`
+ * fires only when the count reaches zero.
+ *
+ * **Recommended: wrap this hook once per resource and call the wrapper
+ * everywhere.** Centralising the `key` + `subscribe` + `unsubscribe`
+ * derivation in a single custom hook (e.g. `useSpaceSubscription`) makes
+ * it impossible for two call sites to drift apart on params. Combined
+ * with first-payload-wins semantics (see below), this turns a whole
+ * class of bugs into a non-issue.
+ *
+ * **Gating with `enabled`**: pass `enabled: false` to opt out entirely
+ * (no wire send, no ref-count touch). Flipping `false → true` subscribes;
+ * `true → false` unsubscribes. Mirrors React Query's `enabled` semantics.
+ *
+ * **Payload is captured at subscription time, not reactive.** `subscribe`
+ * and `unsubscribe` payloads are read when the effect runs (mount, key
+ * change, or `enabled` flip). Mutating them mid-life does NOT re-send.
+ * To update the server with new state, send a separate message via
+ * `useSocketSend`, or change `key` to force a resubscribe.
+ *
+ * **First-payload wins.** When multiple components subscribe to the same
+ * `key`, only the first payload is sent on the wire and stored for replay
+ * on reconnect. Later subscribers only bump the ref count. If two call
+ * sites disagree on the payload, the disagreement is silent — wrap in a
+ * custom hook to make it impossible. If your protocol needs each joiner
+ * to identify itself, send a separate `useSocketSend` message instead of
+ * relying on the subscribe payload.
+ *
+ * @example
+ * ```tsx
+ * // Centralised wrapper — every consumer uses this, never the raw hook.
+ * export function useSpaceSubscription(spaceId: string | null) {
+ *   useSocketSubscription(manager, {
+ *     key: spaceId ?? "",
+ *     enabled: spaceId !== null,
+ *     subscribe: spaceId ? { type: "join", spaceId } : undefined,
+ *     unsubscribe: spaceId ? { type: "leave", spaceId } : undefined,
+ *   });
+ * }
+ * ```
+ */
 export function useSocketSubscription<TClientMsg>(
 	manager: TSubscribable<TClientMsg>,
 	args: {
 		key: string;
 		subscribe?: TClientMsg;
 		unsubscribe?: TClientMsg;
+		enabled?: boolean;
 	},
 ): void {
-	const { key, subscribe, unsubscribe } = args;
+	const { key, subscribe, unsubscribe, enabled = true } = args;
 	const subscribeRef = useRef(subscribe);
 	const unsubscribeRef = useRef(unsubscribe);
 	subscribeRef.current = subscribe;
 	unsubscribeRef.current = unsubscribe;
 
 	useEffect(() => {
+		if (!enabled) return;
 		manager.subscribe(key, subscribeRef.current);
 		return () => {
 			manager.unsubscribe(key, unsubscribeRef.current);
 		};
-	}, [manager, key]);
+	}, [manager, key, enabled]);
 }
 
 // ── useSocketPendingSubscription ─────────────────────────────────────
@@ -174,6 +247,23 @@ type TSendIntentSource<TClientMsg> = {
 	) => () => void;
 };
 
+/**
+ * Observe every outgoing send the moment `manager.send(...)` is called,
+ * regardless of whether the socket actually delivers it. Fires before
+ * the wire write, so it sees offline sends too. Use this to drive
+ * optimistic UI: append the message to local state immediately, then
+ * pair with `useSocketInFlightDrop` to roll back if the send is dropped
+ * by a disconnect before being acked.
+ *
+ * @example
+ * ```tsx
+ * useSocketSendIntent(manager, ({ data, ackId }) => {
+ *   if (data.type === "chat") {
+ *     addOptimisticMessage({ ...data, ackId, status: "pending" });
+ *   }
+ * });
+ * ```
+ */
 export function useSocketSendIntent<TClientMsg>(
 	manager: TSendIntentSource<TClientMsg>,
 	handler: (params: TSendParams<TClientMsg>) => void,
@@ -195,6 +285,22 @@ type TInFlightDropSource<TClientMsg> = {
 	) => () => void;
 };
 
+/**
+ * Fires when in-flight messages (those sent with an `ackId`) are dropped
+ * because the socket closed before the server acked them. Use this to
+ * roll back optimistic UI added in `useSocketSendIntent`, or to enqueue
+ * the messages for resend via `createUndeliveredSync`.
+ *
+ * @example
+ * ```tsx
+ * useSocketInFlightDrop(manager, (dropped) => {
+ *   for (const { id, data } of dropped) {
+ *     markMessageFailed(id);
+ *     undeliveredSync.enqueue(data);
+ *   }
+ * });
+ * ```
+ */
 export function useSocketInFlightDrop<TClientMsg>(
 	manager: TInFlightDropSource<TClientMsg>,
 	handler: (messages: { id: string; data: TClientMsg }[]) => void,
@@ -214,6 +320,20 @@ type TReadySource = {
 	addReadyListener: (cb: (restoredKeys: string[]) => void) => () => void;
 };
 
+/**
+ * Fires every time the socket transitions to `connected` AND existing
+ * subscriptions have been replayed to the server. Receives the list of
+ * resubscribed keys. Use this to flush queued offline sends or to
+ * refetch state that may have drifted during the disconnect.
+ *
+ * @example
+ * ```tsx
+ * useSocketReady(manager, (restoredKeys) => {
+ *   for (const msg of undeliveredSync.drain()) manager.send({ data: msg });
+ *   if (restoredKeys.length > 0) refetchSpaceStateForKeys(restoredKeys);
+ * });
+ * ```
+ */
 export function useSocketReady(
 	manager: TReadySource,
 	handler: (restoredKeys: string[]) => void,
@@ -233,6 +353,25 @@ type TLastUnsubscribeSource<TClientMsg> = {
 	) => () => void;
 };
 
+/**
+ * Fires when the subscription ref count for `key` drops to zero — the
+ * last subscriber left and the wire `unsubscribe` was sent. Use it to
+ * clear cached server state for the key, or to fire app-level cleanup
+ * tied to "no one is watching this channel anymore."
+ *
+ * **Strict Mode**: React 18+ Strict Mode double-mounts components in
+ * dev, causing a transient mount→unmount→remount cycle that fires this
+ * listener spuriously. Keep handlers idempotent — write to state, do
+ * not perform irreversible side effects (e.g. POST cleanup, decrement
+ * external counters). Production behavior is unaffected.
+ *
+ * @example
+ * ```tsx
+ * useSocketLastUnsubscribe(manager, (key) => {
+ *   queryClient.removeQueries({ queryKey: ["space", key] });
+ * });
+ * ```
+ */
 export function useSocketLastUnsubscribe<TClientMsg>(
 	manager: TLastUnsubscribeSource<TClientMsg>,
 	handler: (key: string, data: TClientMsg | undefined) => void,

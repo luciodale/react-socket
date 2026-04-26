@@ -51,9 +51,9 @@ const manager = new WebSocketManager<TClientMsg, TServerMsg>({
   url: "wss://api.example.com/ws",
   serialize: (m) => JSON.stringify(m),
   deserialize: (r) => JSON.parse(r),
-  reconnectMaxAttempts: 5,
+  reconnectMaxAttempts: 10,
   reconnectBaseDelayMs: 1_000,
-  reconnectMaxDelayMs: 5_000,
+  reconnectMaxDelayMs: 30_000,
 });
 
 function Chat() {

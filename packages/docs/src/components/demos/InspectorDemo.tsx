@@ -1,12 +1,17 @@
-import { useConnectionState, WebSocketManager } from "@luciodale/react-socket";
+import {
+	useSocketConnectionState,
+	useSocketEvent,
+	useSocketSend,
+	WebSocketManager,
+} from "@luciodale/react-socket";
 import { InspectorPanel } from "@luciodale/react-socket/inspector";
 import { useEffect, useMemo, useState } from "react";
 import { getWsUrl } from "../../lib/ws-url";
 
 // ── Protocol ────────────────────────────────────────────────────────
 
-type TClientMsg = { action: "echo"; text: string };
-type TServerMsg = { action: "echo"; text: string };
+type TClientMsg = { type: "echo"; text: string };
+type TServerMsg = { type: "echo"; text: string };
 
 // ── Component ───────────────────────────────────────────────────────
 
@@ -16,27 +21,30 @@ export function InspectorDemo() {
 		Array<{ id: string; from: string; text: string }>
 	>([]);
 
-	const manager = useMemo(() => {
-		const m = new WebSocketManager<TClientMsg, TServerMsg>({
-			url: getWsUrl(),
-			serialize: (msg) => JSON.stringify(msg),
-			deserialize: (raw) => JSON.parse(raw) as TServerMsg,
-			onMessageReceived(msg) {
-				setMessages((prev) => [
-					...prev,
-					{ id: crypto.randomUUID(), from: "server", text: msg.text },
-				]);
-			},
-		});
-		return m;
-	}, []);
+	const manager = useMemo(
+		() =>
+			new WebSocketManager<TClientMsg, TServerMsg>({
+				url: getWsUrl(),
+				serialize: (msg) => JSON.stringify(msg),
+				deserialize: (raw) => JSON.parse(raw) as TServerMsg,
+			}),
+		[],
+	);
 
 	useEffect(() => {
 		manager.connect();
 		return () => manager.disconnect();
 	}, [manager]);
 
-	const state = useConnectionState(manager);
+	useSocketEvent(manager, "echo", (msg) => {
+		setMessages((prev) => [
+			...prev,
+			{ id: crypto.randomUUID(), from: "server", text: msg.text },
+		]);
+	});
+
+	const state = useSocketConnectionState(manager);
+	const { send } = useSocketSend(manager);
 
 	function handleSend() {
 		if (!input.trim()) return;
@@ -45,7 +53,7 @@ export function InspectorDemo() {
 			...prev,
 			{ id: crypto.randomUUID(), from: "you", text },
 		]);
-		manager.send({ data: { action: "echo", text } });
+		send({ type: "echo", text });
 		setInput("");
 	}
 

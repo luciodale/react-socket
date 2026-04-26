@@ -190,4 +190,76 @@ describe("useSocketEventBatch", () => {
 
 		expect(captured).toBe("second");
 	});
+
+	describe("idleMs", () => {
+		it("flushes after idle silence shorter than flushMs", () => {
+			const { manager, transport } = createManager();
+			const batches: number[][] = [];
+
+			renderHook(() =>
+				useSocketEventBatch(
+					manager,
+					"tick",
+					(msgs) => batches.push(msgs.map((m) => m.n)),
+					{ flushMs: 100, idleMs: 10 },
+				),
+			);
+
+			pushTick(transport, 1);
+			pushTick(transport, 2);
+
+			// Idle window elapses well before the interval would have fired.
+			vi.advanceTimersByTime(10);
+			expect(batches).toEqual([[1, 2]]);
+		});
+
+		it("resets the idle timer on each new event so bursts coalesce", () => {
+			const { manager, transport } = createManager();
+			const batches: number[][] = [];
+
+			renderHook(() =>
+				useSocketEventBatch(
+					manager,
+					"tick",
+					(msgs) => batches.push(msgs.map((m) => m.n)),
+					{ flushMs: 200, idleMs: 20 },
+				),
+			);
+
+			pushTick(transport, 1);
+			vi.advanceTimersByTime(15);
+			pushTick(transport, 2);
+			vi.advanceTimersByTime(15);
+			pushTick(transport, 3);
+
+			// No flush yet — each event reset the idle timer.
+			expect(batches).toEqual([]);
+
+			vi.advanceTimersByTime(20);
+			expect(batches).toEqual([[1, 2, 3]]);
+		});
+
+		it("interval flush still fires when stream stays busy under idleMs", () => {
+			const { manager, transport } = createManager();
+			const batches: number[][] = [];
+
+			renderHook(() =>
+				useSocketEventBatch(
+					manager,
+					"tick",
+					(msgs) => batches.push(msgs.map((m) => m.n)),
+					{ flushMs: 30, idleMs: 50 },
+				),
+			);
+
+			// Push events faster than idleMs so the idle timer never fires.
+			for (let i = 0; i < 6; i += 1) {
+				pushTick(transport, i);
+				vi.advanceTimersByTime(10);
+			}
+
+			// Interval (30ms) flushed at least once during that 60ms window.
+			expect(batches.length).toBeGreaterThanOrEqual(1);
+		});
+	});
 });

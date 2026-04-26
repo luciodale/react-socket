@@ -1,0 +1,95 @@
+---
+import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
+import { Feed } from "../../components/demos/Feed";
+import DocsPage from "../../layouts/DocsPage.astro";
+import { href } from "../../lib/link";
+
+export const prerender = true;
+---
+
+<DocsPage title="Activity Feed" description="A bursty append-only feed of human and agent activity. Demonstrates flushMs + idleMs for tail latency.">
+	<ContentSection label="Activity feed">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Activity feeds are <em>bursty</em>: a build kicks off and emits
+			twelve events in 200ms, then nothing for two seconds. Two failure
+			modes to avoid:
+		</p>
+		<ul class="list-disc list-inside space-y-2 text-white/60 mb-4">
+			<li>
+				<strong class="text-white/80">No batching</strong> — one render
+				per event tanks the list during a burst.
+			</li>
+			<li>
+				<strong class="text-white/80">Batching with only flushMs</strong>
+				— the last events of a burst hang in the buffer waiting for the
+				next interval tick. Users see the feed pause mid-burst.
+			</li>
+		</ul>
+		<p class="text-white/60 leading-relaxed">
+			<InlineCode>flushMs: 80, idleMs: 40</InlineCode> coalesces the
+			steady-state work and trims the tail.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Live demo">
+		<Feed client:load />
+	</ContentSection>
+
+	<ContentSection label="Source">
+		<CodeBlock
+			code={`type TFeedEvent = {
+  type: "feed";
+  id: string;
+  actor: string;
+  actorKind: "human" | "agent";
+  verb: string;
+  target: string;
+  ts: number;
+};
+
+const MAX_VISIBLE = 60;
+
+function ActivityFeed() {
+  const [items, setItems] = useState<TFeedEvent[]>([]);
+
+  useSocketEventBatch(
+    manager,
+    "feed",
+    (msgs) => {
+      if (msgs.length === 0) return;
+      setItems((prev) => [...msgs, ...prev].slice(0, MAX_VISIBLE));
+    },
+    { flushMs: 80, idleMs: 40 },
+  );
+
+  // ...render
+}`}
+			language="tsx"
+			filename="Feed.tsx"
+		/>
+		<Callout type="tip" title="Why cap MAX_VISIBLE">
+			An append-only feed grows without bound. For human-readable feeds
+			60–200 visible rows is plenty; older items go to a "load more"
+			view backed by REST. For machine logs that must be exhaustive,
+			pair with virtualization (<InlineCode>react-window</InlineCode>,
+			<InlineCode>TanStack Virtual</InlineCode>) and keep the full array.
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Mixing human and agent activity">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			The protocol carries an <InlineCode>actorKind</InlineCode> so the
+			feed can render agent events differently from human events without
+			the client guessing. Same wire shape, two render paths.
+		</p>
+	</ContentSection>
+
+	<p class="text-white/60 mt-6 leading-relaxed">
+		See <a href={href("/docs/backpressure")} class="text-accent hover:underline">Backpressure</a>
+		for the full <InlineCode>flushMs</InlineCode> /
+		<InlineCode>idleMs</InlineCode> reference.
+	</p>
+</DocsPage>

@@ -1,0 +1,143 @@
+---
+import Callout from "@luciodale/docs-ui-kit/components/Callout.astro";
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
+import { AiConversation } from "../../components/demos/AiConversation";
+import DocsPage from "../../layouts/DocsPage.astro";
+import { href } from "../../lib/link";
+
+export const prerender = true;
+---
+
+<DocsPage title="AI Conversation" description="Token streaming with presets and artifact attachments. The pattern every realtime AI UI ends up needing.">
+	<ContentSection label="AI conversation">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Three things every realtime AI surface needs:
+		</p>
+		<ul class="list-disc list-inside space-y-2 text-white/60 mb-4">
+			<li>
+				<strong class="text-white/80">Streamed tokens</strong> — render the
+				assistant's reply word by word, without re-rendering the entire
+				history per delta.
+			</li>
+			<li>
+				<strong class="text-white/80">Presets</strong> — a single send with
+				a typed <InlineCode>preset</InlineCode> field that the server
+				routes (summarize, translate, explain, generate code).
+			</li>
+			<li>
+				<strong class="text-white/80">Artifacts</strong> — structured
+				outputs (code, docs, tables) that arrive alongside the stream and
+				render in their own card.
+			</li>
+		</ul>
+		<p class="text-white/60 leading-relaxed">
+			One <InlineCode>useSocketEventBatch</InlineCode> for tokens, two
+			<InlineCode>useSocketEvent</InlineCode>s for the lifecycle frames,
+			one zustand store split into history / streaming / artifacts.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Live demo">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Pick a preset, ask a question. The <strong class="text-white/80">Code</strong>
+			preset emits an artifact card at <InlineCode>stream-end</InlineCode>.
+		</p>
+		<AiConversation client:load />
+	</ContentSection>
+
+	<ContentSection label="Protocol">
+		<CodeBlock
+			code={`type TPreset = "summarize" | "translate" | "explain" | "code";
+
+type TClientMsg = {
+  type: "ask";
+  id: string;
+  prompt: string;
+  preset?: TPreset;
+};
+
+type TServerMsg =
+  | { type: "stream-start"; id: string; role: "assistant" }
+  | { type: "stream-delta"; id: string; delta: string }
+  | { type: "artifact"; id: string; kind: "code" | "doc" | "table"; title: string; body: string }
+  | { type: "stream-end"; id: string };`}
+			language="tsx"
+			filename="protocol.ts"
+		/>
+	</ContentSection>
+
+	<ContentSection label="Token batching">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Tokens arrive at 30–100ms cadence. A <InlineCode>setState</InlineCode>
+			per delta is fine for one stream — death for many. Coalesce inside
+			the bridge:
+		</p>
+		<CodeBlock
+			code={`function StreamBridge() {
+  useSocketEvent(manager, "stream-start", (msg) => {
+    useStore.getState().startStream(msg.id);
+  });
+  useSocketEventBatch(
+    manager,
+    "stream-delta",
+    (msgs) => {
+      // Group by stream id (concurrent streams share the channel)
+      const grouped = new Map<string, string[]>();
+      for (const m of msgs) {
+        const list = grouped.get(m.id) ?? [];
+        list.push(m.delta);
+        grouped.set(m.id, list);
+      }
+      for (const [id, deltas] of grouped) {
+        useStore.getState().appendDeltas(id, deltas);
+      }
+    },
+    { flushMs: 16, idleMs: 8 },
+  );
+  useSocketEvent(manager, "artifact", (msg) => {
+    useStore.getState().addArtifact(msg.id, msg);
+  });
+  useSocketEvent(manager, "stream-end", (msg) => {
+    useStore.getState().endStream(msg.id);
+  });
+  return null;
+}`}
+			language="tsx"
+			filename="StreamBridge.tsx"
+		/>
+		<Callout type="tip" title="Why idleMs">
+			With <InlineCode>flushMs: 16</InlineCode> alone, the last 1–3 tokens
+			of a stream sit in the buffer waiting for the next interval tick.
+			<InlineCode>idleMs: 8</InlineCode> flushes after 8ms of channel
+			silence, so the tail lands without the visible stall users notice as
+			"the cursor froze just before the answer finished."
+		</Callout>
+	</ContentSection>
+
+	<ContentSection label="Why split history / streaming / artifacts">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Each slice has a different change frequency. History only changes
+			when a turn finishes, so it can be memoised and skipped during a
+			stream. Streaming mutates per token but only ever for one component.
+			Artifacts only land at <InlineCode>stream-end</InlineCode>. Keeping
+			them in separate fields is the simplest thing that makes per-token
+			renders cheap.
+		</p>
+		<CodeBlock
+			code={`type TStore = {
+  history: TTurn[];                          // append once per finished turn
+  streaming: Record<string, string>;         // mutates per delta, keyed by stream id
+  artifacts: Record<string, TArtifact>;      // lands at stream-end, keyed by stream id
+};`}
+			language="tsx"
+			filename="store.ts"
+		/>
+	</ContentSection>
+
+	<p class="text-white/60 mt-6 leading-relaxed">
+		See the matching <a href={href("/docs/patterns#llm-streaming-split-streaming-from-history")} class="text-accent hover:underline">LLM streaming pattern</a>
+		and <a href={href("/docs/backpressure")} class="text-accent hover:underline">Backpressure</a> guide.
+	</p>
+</DocsPage>

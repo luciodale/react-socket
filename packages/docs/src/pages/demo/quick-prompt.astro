@@ -1,0 +1,85 @@
+---
+import CodeBlock from "@luciodale/docs-ui-kit/components/CodeBlock.astro";
+import ContentSection from "@luciodale/docs-ui-kit/components/ContentSection.astro";
+import InlineCode from "@luciodale/docs-ui-kit/components/InlineCode.astro";
+import { QuickPrompt } from "../../components/demos/QuickPrompt";
+import DocsPage from "../../layouts/DocsPage.astro";
+import { href } from "../../lib/link";
+
+export const prerender = true;
+---
+
+<DocsPage title="Quick Prompt" description="The simplest possible AI interaction: send a prompt, get a one-shot reply, no streaming, no acks.">
+	<ContentSection label="Quick prompt">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			One component, one message in, one message out. No store, no
+			subscriptions, no acks. Useful for slash commands, inline assistants,
+			or any "click button → ask LLM → render" interaction where the
+			response is short enough that streaming is overkill.
+		</p>
+		<p class="text-white/60 leading-relaxed">
+			This is the smallest sketch that still tells the truth: the manager
+			is created in <InlineCode>useMemo</InlineCode>, lifecycle is one
+			<InlineCode>useEffect</InlineCode>, and the entire wire surface is
+			one <InlineCode>useSocketEvent</InlineCode> +
+			<InlineCode>useSocketSend</InlineCode>.
+		</p>
+	</ContentSection>
+
+	<ContentSection label="Live demo">
+		<QuickPrompt client:load />
+	</ContentSection>
+
+	<ContentSection label="Source">
+		<CodeBlock
+			code={`import { useEffect, useMemo, useState } from "react";
+import {
+  useSocketEvent,
+  useSocketSend,
+  WebSocketManager,
+} from "@luciodale/react-socket";
+
+type TClientMsg = { type: "quick-ask"; id: string; prompt: string };
+type TServerMsg = { type: "chat"; id: string; sender: string; text: string };
+
+function QuickPrompt() {
+  const [input, setInput] = useState("");
+  const [replies, setReplies] = useState<{ id: string; text: string }[]>([]);
+
+  const manager = useMemo(
+    () =>
+      new WebSocketManager<TClientMsg, TServerMsg>({
+        url: "ws://localhost:3001/ws",
+        serialize: (msg) => JSON.stringify(msg),
+        deserialize: (raw) => JSON.parse(raw),
+      }),
+    [],
+  );
+
+  useEffect(() => {
+    manager.connect();
+    return () => manager.disconnect();
+  }, [manager]);
+
+  useSocketEvent(manager, "chat", (msg) => {
+    setReplies((prev) => [...prev, { id: msg.id, text: msg.text }]);
+  });
+
+  const { send } = useSocketSend(manager);
+
+  function ask() {
+    if (!input.trim()) return;
+    send({ type: "quick-ask", id: crypto.randomUUID(), prompt: input.trim() });
+    setInput("");
+  }
+  // ...render
+}`}
+			language="tsx"
+			filename="QuickPrompt.tsx"
+		/>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			Move up to <a href={href("/demo/ai-conversation")} class="text-accent hover:underline">AI Conversation</a>
+			when you need streaming tokens, presets, or artifacts.
+		</p>
+	</ContentSection>
+</DocsPage>

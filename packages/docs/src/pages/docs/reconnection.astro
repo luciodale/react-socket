@@ -24,12 +24,13 @@ export const prerender = true;
 			On an unexpected close (any code other than 1000), the manager:
 		</p>
 		<ol class="list-decimal list-inside space-y-2 text-white/60 mb-4">
-			<li>Sets the state to <InlineCode>"reconnecting"</InlineCode></li>
 			<li>Drops any in-flight messages and notifies <InlineCode>useSocketInFlightDrop</InlineCode> listeners</li>
+			<li>Clears any pending subscriptions</li>
+			<li>Sets the state to <InlineCode>"reconnecting"</InlineCode></li>
 			<li>Waits using exponential backoff with jitter</li>
 			<li>Opens a new connection</li>
 			<li>Re-sends all active subscriptions</li>
-			<li>Fires <InlineCode>onReady</InlineCode></li>
+			<li>Fires <InlineCode>onReady</InlineCode> with the list of restored subscription keys</li>
 		</ol>
 		<p class="text-white/60 leading-relaxed">
 			If <InlineCode>disconnect()</InlineCode> was called, or the server
@@ -39,24 +40,32 @@ export const prerender = true;
 
 	<ContentSection label="Exponential Backoff">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Each retry waits longer than the last, with a random jitter to prevent
-			all clients from reconnecting at the same instant:
+			Each retry waits longer than the last, with a random 0–1000ms
+			jitter to prevent all clients from reconnecting at the same instant:
 		</p>
 		<CodeBlock
-			code={`delay = min(baseDelay * 2^attempt + random jitter, maxDelay)`}
+			code={`delay = min(baseDelay * 2^attempt + random(0, 1000ms), maxDelay)`}
 			language="text"
 			filename="formula"
 		/>
 		<p class="text-white/60 mt-4 mb-4 leading-relaxed">
-			With the default settings:
+			With the default settings (base 1s, cap 30s, 10 attempts):
 		</p>
 		<ul class="list-disc list-inside space-y-2 text-white/60">
-			<li>Attempt 1: ~1s</li>
-			<li>Attempt 2: ~2s</li>
-			<li>Attempt 3: ~4s</li>
-			<li>Attempt 4: ~5s (capped)</li>
-			<li>Attempt 5: ~5s (capped) — last attempt</li>
+			<li>Attempt 1: ~1–2s</li>
+			<li>Attempt 2: ~2–3s</li>
+			<li>Attempt 3: ~4–5s</li>
+			<li>Attempt 4: ~8–9s</li>
+			<li>Attempt 5: ~16–17s</li>
+			<li>Attempts 6–10: 30s (capped)</li>
 		</ul>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			Total worst-case time before giving up: ~3 minutes. Pass
+			<InlineCode>reconnectMaxAttempts: Number.POSITIVE_INFINITY</InlineCode>
+			to retry forever (useful for long-lived apps that prefer to surface
+			a stale-connection banner instead of a terminal
+			<InlineCode>"disconnected"</InlineCode> state).
+		</p>
 	</ContentSection>
 
 	<ContentSection label="Configuration">
@@ -64,14 +73,14 @@ export const prerender = true;
 			code={`const manager = new WebSocketManager<TClientMsg, TServerMsg>({
   // ...
 
-  // Maximum number of reconnect attempts (default: 5)
-  reconnectMaxAttempts: 5,
+  // Maximum number of reconnect attempts (default: 10)
+  reconnectMaxAttempts: 10,
 
   // Initial delay before the first retry (default: 1000ms)
   reconnectBaseDelayMs: 1_000,
 
-  // Maximum delay between retries (default: 5000ms)
-  reconnectMaxDelayMs: 5_000,
+  // Maximum delay between retries (default: 30000ms)
+  reconnectMaxDelayMs: 30_000,
 });`}
 			language="tsx"
 			filename="manager.ts"
@@ -91,11 +100,15 @@ export const prerender = true;
 		</p>
 		<FeatureList features={[
 			{ highlight: "Offline", description: "the connection is immediately closed and the state moves to \"reconnecting\"", color: "yellow" },
-			{ highlight: "Online", description: "the reconnect attempt counter resets to zero and a new connection attempt starts immediately (no backoff delay)", color: "blue" },
+			{ highlight: "Online", description: "the reconnect attempt counter resets to zero and a fresh attempt is scheduled at the base delay (~1–2s)", color: "blue" },
 		]} />
-		<Callout type="tip" title="Instant Recovery">
-			When the browser fires the <InlineCode>online</InlineCode> event, the reconnect counter
-			resets to zero and a connection attempt starts immediately with no backoff delay.
+		<Callout type="tip" title="Fast Recovery">
+			When the browser fires the <InlineCode>online</InlineCode> event,
+			the reconnect counter resets to zero so the next attempt starts at
+			the base delay (~1–2s) instead of wherever the exponential
+			backoff had climbed to. For an immediate, synchronous reconnect
+			(e.g. after a token refresh), call
+			<InlineCode>forceReconnect()</InlineCode> directly.
 		</Callout>
 	</ContentSection>
 
@@ -118,10 +131,11 @@ export const prerender = true;
 
 	<ContentSection label="Subscription Restoration">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			After reconnecting, the manager re-sends all active subscriptions using the
-			<InlineCode>data</InlineCode> payload you passed to
-			<InlineCode>subscribe()</InlineCode>. Your components don't need
-			to track or re-trigger anything.
+			After reconnecting, the manager re-sends every active subscription
+			using the <InlineCode>subscribe</InlineCode> payload from the
+			<em>first</em> subscriber for that key (first-payload wins — see
+			<a href={href("/docs/subscriptions")} class="text-accent hover:underline">Subscriptions</a>).
+			Your components don't need to track or re-trigger anything.
 		</p>
 		<p class="text-white/60 leading-relaxed">
 			The <InlineCode>onReady</InlineCode> callback fires after all

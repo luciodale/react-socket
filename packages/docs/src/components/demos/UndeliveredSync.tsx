@@ -1,7 +1,11 @@
 import {
 	createLocalStorage,
 	createUndeliveredSync,
-	useConnectionState,
+	useSocketConnectionState,
+	useSocketEvent,
+	useSocketInFlightDrop,
+	useSocketSend,
+	useSocketSendIntent,
 	WebSocketManager,
 } from "@luciodale/react-socket";
 import { useEffect, useState } from "react";
@@ -11,16 +15,18 @@ import { getWsUrl } from "../../lib/ws-url";
 // ── Protocol ────────────────────────────────────────────────────────
 
 type TClientMsg =
-	| { action: "ping" }
-	| { action: "message"; id: string; channel: string; text: string };
+	| { type: "ping" }
+	| { type: "message"; id: string; channel: string; text: string };
 
 type TServerMsg =
-	| { action: "pong" }
+	| { type: "pong" }
+	| { type: "delivered"; ackId: string }
 	| {
-			action: "message";
+			type: "chat";
 			id: string;
 			channel: string;
 			sender: string;
+			senderKind: "human" | "agent";
 			text: string;
 	  };
 
@@ -37,7 +43,7 @@ type TUIMessage = {
 
 // ── Constants ───────────────────────────────────────────────────────
 
-const CHANNEL = "demo";
+const CHANNEL = "space:resilient";
 
 // ── Undelivered Store ───────────────────────────────────────────────
 
@@ -59,18 +65,25 @@ const manager = new WebSocketManager<TClientMsg, TServerMsg>({
 	serialize: (msg) => JSON.stringify(msg),
 	deserialize: (raw) => JSON.parse(raw) as TServerMsg,
 
-	ping: () => ({ action: "ping" }),
-	isPong: (msg) => msg.action === "pong",
+	ping: () => ({ type: "ping" }),
+	isPong: (msg) => msg.type === "pong",
 
-	onSendIntent({ data, ackId }) {
-		if (data.action !== "message" || !ackId) return;
+	getAckId: (msg) => (msg.type === "delivered" ? msg.ackId : undefined),
+});
+
+// ── Bridges ─────────────────────────────────────────────────────────
+
+function OptimisticBridge() {
+	useSocketSendIntent(manager, ({ data, ackId }) => {
+		if (data.type !== "message" || !ackId) return;
 		useStore.setState((s) => {
-			const exists = s.messages.some((m) => m.id === ackId);
-			if (exists) {
+			const existing = s.messages.find((m) => m.id === ackId);
+			if (existing) {
+				// Retry: bump to the end so the user sees it as "sent just now"
+				// rather than stuck in its original failed position.
+				const without = s.messages.filter((m) => m.id !== ackId);
 				return {
-					messages: s.messages.map((m) =>
-						m.id === ackId ? { ...m, status: "retrying" as const } : m,
-					),
+					messages: [...without, { ...existing, status: "retrying" as const }],
 				};
 			}
 			return {
@@ -80,40 +93,11 @@ const manager = new WebSocketManager<TClientMsg, TServerMsg>({
 				],
 			};
 		});
-	},
+	});
 
-	onMessageReceived(msg) {
-		if (msg.action !== "message") return;
-
-		manager.ackInFlight(msg.id);
-		undelivered.removeMessage(msg.channel, msg.id);
-
-		useStore.setState((s) => {
-			const exists = s.messages.some((m) => m.id === msg.id);
-			if (exists) {
-				return {
-					messages: s.messages.map((m) =>
-						m.id === msg.id ? { ...m, status: "delivered" as const } : m,
-					),
-				};
-			}
-			return {
-				messages: [
-					...s.messages,
-					{
-						id: msg.id,
-						sender: msg.sender,
-						text: msg.text,
-						status: "delivered",
-					},
-				],
-			};
-		});
-	},
-
-	onInFlightDrop(messages) {
+	useSocketInFlightDrop(manager, (messages) => {
 		for (const { id, data } of messages) {
-			if (data.action === "message") {
+			if (data.type === "message") {
 				undelivered.addMessage(data.channel, {
 					id,
 					channel: data.channel,
@@ -127,8 +111,43 @@ const manager = new WebSocketManager<TClientMsg, TServerMsg>({
 				droppedIds.has(m.id) ? { ...m, status: "failed" as const } : m,
 			),
 		}));
-	},
-});
+	});
+
+	return null;
+}
+
+function DeliveredBridge() {
+	useSocketEvent(manager, "delivered", (msg) => {
+		undelivered.removeMessage(CHANNEL, msg.ackId);
+		useStore.setState((s) => ({
+			messages: s.messages.map((m) =>
+				m.id === msg.ackId ? { ...m, status: "delivered" as const } : m,
+			),
+		}));
+	});
+	return null;
+}
+
+function ChatBridge() {
+	useSocketEvent(manager, "chat", (msg) => {
+		useStore.setState((s) => {
+			const exists = s.messages.some((m) => m.id === msg.id);
+			if (exists) return s;
+			return {
+				messages: [
+					...s.messages,
+					{
+						id: msg.id,
+						sender: msg.sender,
+						text: msg.text,
+						status: "delivered",
+					},
+				],
+			};
+		});
+	});
+	return null;
+}
 
 // ── Status Labels ───────────────────────────────────────────────────
 
@@ -151,7 +170,8 @@ const STATUS_COLOR: Record<TStatus, string> = {
 export function UndeliveredSync() {
 	const [input, setInput] = useState("");
 	const messages = useStore((s) => s.messages);
-	const state = useConnectionState(manager);
+	const state = useSocketConnectionState(manager);
+	const { send } = useSocketSend(manager);
 
 	useEffect(() => {
 		undelivered.init().then(() => {
@@ -182,10 +202,7 @@ export function UndeliveredSync() {
 		if (!input.trim()) return;
 		const text = input.trim();
 		const id = crypto.randomUUID();
-		const sent = manager.send({
-			data: { action: "message", id, channel: CHANNEL, text },
-			ackId: id,
-		});
+		const sent = send({ type: "message", id, channel: CHANNEL, text }, id);
 		if (!sent) {
 			undelivered.addMessage(CHANNEL, { id, channel: CHANNEL, text });
 			useStore.setState((s) => ({
@@ -206,10 +223,7 @@ export function UndeliveredSync() {
 	}
 
 	function handleRetry(id: string, text: string) {
-		const sent = manager.send({
-			data: { action: "message", id, channel: CHANNEL, text },
-			ackId: id,
-		});
+		const sent = send({ type: "message", id, channel: CHANNEL, text }, id);
 		if (!sent) {
 			useStore.setState((s) => ({
 				messages: s.messages.map((m) =>
@@ -220,10 +234,14 @@ export function UndeliveredSync() {
 	}
 
 	const inFlight = messages.filter((m) => m.status === "sending").length;
-	const failed = messages.filter((m) => m.status === "failed").length;
+	const delivered = messages.filter((m) => m.status !== "failed");
+	const failedMessages = messages.filter((m) => m.status === "failed");
 
 	return (
 		<div className="space-y-4">
+			<OptimisticBridge />
+			<DeliveredBridge />
+			<ChatBridge />
 			<div className="rounded-lg border border-white/10 bg-white/[0.02] p-4">
 				<div className="mb-3 flex items-center justify-between">
 					<div className="flex items-center gap-2">
@@ -248,13 +266,15 @@ export function UndeliveredSync() {
 					</div>
 				</div>
 
-				{(inFlight > 0 || failed > 0) && (
+				{(inFlight > 0 || failedMessages.length > 0) && (
 					<div className="mb-3 flex gap-4 text-xs">
 						{inFlight > 0 && (
 							<span className="text-yellow-400/60">{inFlight} in flight</span>
 						)}
-						{failed > 0 && (
-							<span className="text-red-400/60">{failed} failed</span>
+						{failedMessages.length > 0 && (
+							<span className="text-red-400/60">
+								{failedMessages.length} failed
+							</span>
 						)}
 					</div>
 				)}
@@ -262,11 +282,12 @@ export function UndeliveredSync() {
 				<div className="mb-3 min-h-[120px] max-h-[240px] overflow-y-auto rounded bg-black/40 p-3">
 					{messages.length === 0 && (
 						<p className="text-sm text-white/30">
-							Send a message, disconnect, then reconnect to see persistence in
-							action.
+							Send a message into the space, disconnect, then reconnect.
+							Anything in flight that didn't get acked is held in localStorage
+							and offered back to you.
 						</p>
 					)}
-					{messages.map((m) => (
+					{delivered.map((m) => (
 						<div key={m.id} className="mb-1 flex items-baseline gap-2 text-sm">
 							<span className="text-white/70">
 								<span className="font-semibold text-white/90">{m.sender}:</span>{" "}
@@ -275,18 +296,38 @@ export function UndeliveredSync() {
 							<span className={`text-xs ${STATUS_COLOR[m.status]}`}>
 								{STATUS_LABEL[m.status]}
 							</span>
-							{m.status === "failed" && (
-								<button
-									type="button"
-									onClick={() => handleRetry(m.id, m.text)}
-									className="text-xs text-accent hover:underline cursor-pointer"
-								>
-									retry
-								</button>
-							)}
 						</div>
 					))}
 				</div>
+
+				{failedMessages.length > 0 && (
+					<div className="mb-3 rounded border border-red-400/20 bg-red-400/[0.04] p-3">
+						<div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-wide text-red-400/70">
+							<span className="h-1.5 w-1.5 rounded-full bg-red-400/70" />
+							Failed — tap retry to send again
+						</div>
+						{failedMessages.map((m) => (
+							<div
+								key={m.id}
+								className="mb-1 flex items-baseline gap-2 text-sm last:mb-0"
+							>
+								<span className="text-white/60">
+									<span className="font-semibold text-white/80">
+										{m.sender}:
+									</span>{" "}
+									<span className="line-through opacity-70">{m.text}</span>
+								</span>
+								<button
+									type="button"
+									onClick={() => handleRetry(m.id, m.text)}
+									className="ml-auto rounded border border-accent/40 bg-accent/10 px-2 py-0.5 text-xs text-accent hover:bg-accent/20 cursor-pointer"
+								>
+									retry
+								</button>
+							</div>
+						))}
+					</div>
+				)}
 
 				<div className="flex gap-2">
 					<input

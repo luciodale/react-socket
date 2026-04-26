@@ -53,6 +53,21 @@ export type TManagerConfig<
 	binaryType?: "blob" | "arraybuffer";
 	pingIntervalMs?: number;
 	pongTimeoutMs?: number;
+	/**
+	 * Pause the ping/pong heartbeat while the document is hidden and resume
+	 * when it becomes visible again. Saves battery and avoids spurious pong
+	 * timeouts caused by background-tab throttling on mobile browsers.
+	 * Defaults to false (always heartbeat). Requires `ping`/`isPong` to be
+	 * configured to have any effect.
+	 */
+	pauseHeartbeatWhenHidden?: boolean;
+	/**
+	 * How many reconnect attempts before transitioning to `"disconnected"`.
+	 * Defaults to 10 (~3 minutes of retries with the default backoff).
+	 * Pass `Number.POSITIVE_INFINITY` to retry forever — useful for apps
+	 * that prefer to keep the connection in `"reconnecting"` indefinitely
+	 * and surface a stale-connection banner instead of a terminal state.
+	 */
 	reconnectMaxAttempts?: number;
 	reconnectBaseDelayMs?: number;
 	reconnectMaxDelayMs?: number;
