@@ -69,6 +69,47 @@ function writeStoredLayout(layout: TStoredLayout) {
 	}
 }
 
+type TDragOptions = {
+	onStart: () => (delta: { dx: number; dy: number }) => void;
+	onClick?: () => void;
+	threshold?: number;
+	stopPropagation?: boolean;
+	ignoreOnButton?: boolean;
+};
+
+function createDrag(opts: TDragOptions): (e: React.MouseEvent) => void {
+	return (e) => {
+		if (opts.ignoreOnButton && (e.target as HTMLElement).closest("button"))
+			return;
+		e.preventDefault();
+		if (opts.stopPropagation) e.stopPropagation();
+
+		const startX = e.clientX;
+		const startY = e.clientY;
+		const threshold = opts.threshold ?? 0;
+		let moved = threshold === 0;
+		const handle = opts.onStart();
+
+		function onMouseMove(ev: MouseEvent) {
+			const dx = ev.clientX - startX;
+			const dy = ev.clientY - startY;
+			if (!moved && Math.abs(dx) < threshold && Math.abs(dy) < threshold)
+				return;
+			moved = true;
+			handle({ dx, dy });
+		}
+
+		function onMouseUp() {
+			document.removeEventListener("mousemove", onMouseMove);
+			document.removeEventListener("mouseup", onMouseUp);
+			if (!moved && opts.onClick) opts.onClick();
+		}
+
+		document.addEventListener("mousemove", onMouseMove);
+		document.addEventListener("mouseup", onMouseUp);
+	};
+}
+
 export function useInspectorDrag(
 	anchor: TInspectorPosition,
 	onToggle: () => void,
@@ -119,119 +160,70 @@ export function useInspectorDrag(
 		});
 	}, [bubblePosition, panelPosition, size, sidebarWidth]);
 
-	const onBubbleDown = useCallback((e: React.MouseEvent) => {
-		if ((e.target as HTMLElement).closest("button")) return;
-		e.preventDefault();
+	const onBubbleDown = useCallback(
+		createDrag({
+			ignoreOnButton: true,
+			threshold: DRAG_THRESHOLD,
+			onStart: () => {
+				const start = { ...bubblePosRef.current };
+				return ({ dx, dy }) =>
+					setBubblePosition(
+						clampToViewport(
+							{ x: start.x + dx, y: start.y + dy },
+							BUBBLE_W,
+							BUBBLE_H,
+						),
+					);
+			},
+			onClick: () => onToggleRef.current(),
+		}),
+		[],
+	);
 
-		const startX = e.clientX;
-		const startY = e.clientY;
-		const startPos = { ...bubblePosRef.current };
-		let moved = false;
+	const onHeaderDown = useCallback(
+		createDrag({
+			ignoreOnButton: true,
+			onStart: () => {
+				const start = { ...panelPosRef.current };
+				const { width, height } = sizeRef.current;
+				return ({ dx, dy }) =>
+					setPanelPosition(
+						clampToViewport(
+							{ x: start.x + dx, y: start.y + dy },
+							width,
+							height,
+						),
+					);
+			},
+		}),
+		[],
+	);
 
-		function onMouseMove(ev: MouseEvent) {
-			const dx = ev.clientX - startX;
-			const dy = ev.clientY - startY;
-			if (
-				!moved &&
-				Math.abs(dx) < DRAG_THRESHOLD &&
-				Math.abs(dy) < DRAG_THRESHOLD
-			)
-				return;
-			moved = true;
-			setBubblePosition(
-				clampToViewport(
-					{ x: startPos.x + dx, y: startPos.y + dy },
-					BUBBLE_W,
-					BUBBLE_H,
-				),
-			);
-		}
+	const onResizeDown = useCallback(
+		createDrag({
+			stopPropagation: true,
+			onStart: () => {
+				const start = { ...sizeRef.current };
+				return ({ dx, dy }) =>
+					setSize({
+						width: Math.max(MIN_W, start.width + dx),
+						height: Math.max(MIN_H, start.height + dy),
+					});
+			},
+		}),
+		[],
+	);
 
-		function onMouseUp() {
-			document.removeEventListener("mousemove", onMouseMove);
-			document.removeEventListener("mouseup", onMouseUp);
-			if (!moved) onToggleRef.current();
-		}
-
-		document.addEventListener("mousemove", onMouseMove);
-		document.addEventListener("mouseup", onMouseUp);
-	}, []);
-
-	const onHeaderDown = useCallback((e: React.MouseEvent) => {
-		if ((e.target as HTMLElement).closest("button")) return;
-		e.preventDefault();
-
-		const startX = e.clientX;
-		const startY = e.clientY;
-		const startPos = { ...panelPosRef.current };
-		const { width, height } = sizeRef.current;
-
-		function onMouseMove(ev: MouseEvent) {
-			setPanelPosition(
-				clampToViewport(
-					{
-						x: startPos.x + (ev.clientX - startX),
-						y: startPos.y + (ev.clientY - startY),
-					},
-					width,
-					height,
-				),
-			);
-		}
-
-		function onMouseUp() {
-			document.removeEventListener("mousemove", onMouseMove);
-			document.removeEventListener("mouseup", onMouseUp);
-		}
-
-		document.addEventListener("mousemove", onMouseMove);
-		document.addEventListener("mouseup", onMouseUp);
-	}, []);
-
-	const onResizeDown = useCallback((e: React.MouseEvent) => {
-		e.preventDefault();
-		e.stopPropagation();
-
-		const startX = e.clientX;
-		const startY = e.clientY;
-		const startSize = { ...sizeRef.current };
-
-		function onMouseMove(ev: MouseEvent) {
-			setSize({
-				width: Math.max(MIN_W, startSize.width + (ev.clientX - startX)),
-				height: Math.max(MIN_H, startSize.height + (ev.clientY - startY)),
-			});
-		}
-
-		function onMouseUp() {
-			document.removeEventListener("mousemove", onMouseMove);
-			document.removeEventListener("mouseup", onMouseUp);
-		}
-
-		document.addEventListener("mousemove", onMouseMove);
-		document.addEventListener("mouseup", onMouseUp);
-	}, []);
-
-	const onDividerDown = useCallback((e: React.MouseEvent) => {
-		e.preventDefault();
-
-		const startX = e.clientX;
-		const startWidth = sidebarWidthRef.current;
-
-		function onMouseMove(ev: MouseEvent) {
-			setSidebarWidth(
-				Math.max(SIDEBAR_MIN, startWidth + (ev.clientX - startX)),
-			);
-		}
-
-		function onMouseUp() {
-			document.removeEventListener("mousemove", onMouseMove);
-			document.removeEventListener("mouseup", onMouseUp);
-		}
-
-		document.addEventListener("mousemove", onMouseMove);
-		document.addEventListener("mouseup", onMouseUp);
-	}, []);
+	const onDividerDown = useCallback(
+		createDrag({
+			onStart: () => {
+				const startWidth = sidebarWidthRef.current;
+				return ({ dx }) =>
+					setSidebarWidth(Math.max(SIDEBAR_MIN, startWidth + dx));
+			},
+		}),
+		[],
+	);
 
 	return {
 		bubblePosition,

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import type { WebSocketManager } from "../manager";
-import type { TInspectorPosition } from "./inspector-types";
-import { useEventFilter } from "./use-event-filter";
+import type { TDebugEventType } from "../types";
+import type { TInspectorPosition, TSnapshot } from "./inspector-types";
+import { computeSnapshotDiff, type TSnapshotDiff } from "./snapshot-diff";
 import { useInspectorDrag } from "./use-inspector-drag";
 import { useInspectorState } from "./use-inspector-state";
-import { useSnapshotNavigation } from "./use-snapshot-navigation";
 
 export type TTab = "state" | "diff";
 
@@ -47,15 +47,60 @@ export function useInspectorPanel<
 		maxSnapshots,
 	);
 
-	const { filtered, activeFilters, toggleFilter, clearFilters } =
-		useEventFilter(state.snapshots);
-
-	const { selectedSnapshot, diff, goTo, goToLive } = useSnapshotNavigation(
-		filtered,
-		state.selectedSnapshotId,
-		selectSnapshot,
+	// ── Event filter ─────────────────────────────────────────────────
+	const [activeFilters, setActiveFilters] = useState<Set<TDebugEventType>>(
+		new Set(),
 	);
 
+	const filtered = useMemo(() => {
+		if (activeFilters.size === 0) return state.snapshots;
+		return state.snapshots.filter((s) => activeFilters.has(s.event.type));
+	}, [state.snapshots, activeFilters]);
+
+	function toggleFilter(eventType: TDebugEventType) {
+		setActiveFilters((prev) => {
+			const next = new Set(prev);
+			if (next.has(eventType)) next.delete(eventType);
+			else next.add(eventType);
+			return next;
+		});
+	}
+
+	function clearFilters() {
+		setActiveFilters(new Set());
+	}
+
+	// ── Snapshot navigation ──────────────────────────────────────────
+	const selectedIndex = useMemo(() => {
+		if (state.selectedSnapshotId === null) return null;
+		return filtered.findIndex(
+			(s: TSnapshot<TClientMsg, TServerMsg>) =>
+				s.id === state.selectedSnapshotId,
+		);
+	}, [filtered, state.selectedSnapshotId]);
+
+	const selectedSnapshot =
+		selectedIndex !== null && selectedIndex >= 0
+			? filtered[selectedIndex]
+			: null;
+
+	const diff = useMemo((): TSnapshotDiff<TClientMsg> | null => {
+		if (selectedIndex === null || selectedIndex < 0) return null;
+		if (selectedIndex === 0) return null;
+		const prev = filtered[selectedIndex - 1];
+		const curr = filtered[selectedIndex];
+		return computeSnapshotDiff(prev.state, curr.state);
+	}, [filtered, selectedIndex]);
+
+	function goTo(id: number) {
+		selectSnapshot(id);
+	}
+
+	function goToLive() {
+		selectSnapshot(null);
+	}
+
+	// ── Drag / resize ────────────────────────────────────────────────
 	const {
 		bubblePosition,
 		panelPosition,

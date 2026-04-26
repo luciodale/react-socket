@@ -7,9 +7,7 @@ export function inspectorReducer<TClientMsg, TServerMsg>(
 	switch (action.type) {
 		case "add-snapshot": {
 			const snapshots = [...state.snapshots, action.snapshot];
-			if (snapshots.length > state.maxSnapshots) {
-				snapshots.shift();
-			}
+			if (snapshots.length > state.maxSnapshots) snapshots.shift();
 			return { ...state, snapshots };
 		}
 		case "select-snapshot":
