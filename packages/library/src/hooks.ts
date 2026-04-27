@@ -20,7 +20,14 @@ export function useSocketConnectionState(
 
 // ── useSocketEvent ───────────────────────────────────────────────────
 
-type TKeyedEventSource<TServerMsg> = {
+// `discriminator` is exposed so TS can infer `TKey` from the manager
+// argument. Without it, `TKey` has no inference site and falls back to
+// `string`, which collapses `Record<TKey, string>` into a constraint that
+// rejects any `TServerMsg` with non-string fields — and `Extract` then
+// resolves handlers to `never`. Custom event sources used as test mocks
+// must set `discriminator` accordingly.
+type TKeyedEventSource<TServerMsg, TKey extends string = "type"> = {
+	readonly discriminator: TKey;
 	addEventListener: (
 		value: string,
 		cb: (msg: TServerMsg) => void,
@@ -32,7 +39,7 @@ export function useSocketEvent<
 	TServerMsg extends Record<TKey, string>,
 	TValue extends TServerMsg[TKey],
 >(
-	manager: TKeyedEventSource<TServerMsg>,
+	manager: TKeyedEventSource<TServerMsg, TKey>,
 	value: TValue,
 	handler: (msg: Extract<TServerMsg, Record<TKey, TValue>>) => void,
 ): void {
@@ -73,7 +80,7 @@ export function useSocketEventBatch<
 	TServerMsg extends Record<TKey, string>,
 	TValue extends TServerMsg[TKey],
 >(
-	manager: TKeyedEventSource<TServerMsg>,
+	manager: TKeyedEventSource<TServerMsg, TKey>,
 	value: TValue,
 	handler: (msgs: Array<Extract<TServerMsg, Record<TKey, TValue>>>) => void,
 	options: { flushMs: number; idleMs?: number },
