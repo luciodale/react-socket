@@ -41,7 +41,15 @@ type TServerMsg =
 	| { type: "auth-expired" }
 	| { type: "auth-ok"; userId: string }
 	| { type: "notification"; id: string; title: string; body: string }
-	| { type: "tick"; n: number; ts: number };
+	| {
+			type: "tick";
+			symbol: string;
+			n: number;
+			ts: number;
+			bid: number;
+			ask: number;
+			last: number;
+	  };
 
 // ── Handler ─────────────────────────────────────────────────────────
 
@@ -207,8 +215,23 @@ export const GET: APIRoute = async ({ request }) => {
 	function startTicks() {
 		stopTicks();
 		let n = 0;
+		let mid = 100;
 		ticksInterval = setInterval(() => {
-			const msg: TServerMsg = { type: "tick", n, ts: Date.now() };
+			mid += (Math.random() - 0.5) * 0.4;
+			mid = Math.max(80, Math.min(120, mid));
+			const spread = 0.05 + Math.random() * 0.08;
+			const bid = +(mid - spread / 2).toFixed(3);
+			const ask = +(mid + spread / 2).toFixed(3);
+			const last = +(mid + (Math.random() - 0.5) * spread).toFixed(3);
+			const msg: TServerMsg = {
+				type: "tick",
+				symbol: "RXS-USD",
+				n,
+				ts: Date.now(),
+				bid,
+				ask,
+				last,
+			};
 			server.send(JSON.stringify(msg));
 			n += 1;
 		}, 20);
