@@ -5,9 +5,8 @@
 	"private": true,
 	"scripts": {
 		"dev": "astro dev",
-		"build": "astro build && bunx pagefind --site dist/client --output-subdir projects/react-socket/_pagefind",
-		"preview": "astro build && wrangler dev --config dist/server/wrangler.json",
-		"deploy": "astro build && bunx pagefind --site dist/client --output-subdir projects/react-socket/_pagefind && wrangler deploy --config dist/server/wrangler.json",
+		"build": "astro build && bun run scripts/relocate-base.ts && bunx pagefind --site dist/client/projects/react-socket --output-subdir _pagefind",
+		"preview": "bun run build && wrangler dev --config dist/server/wrangler.json",
 		"dev:server": "bun run server/dev-ws.ts"
 	},
 	"dependencies": {
