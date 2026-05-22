@@ -7,6 +7,7 @@ export const siteConfig: SiteConfig = {
 	siteUrl: "https://koolcodez.com/projects/react-socket",
 	logoSrc: "/logo.svg",
 	logoAlt: "react-socket logo",
+	faviconSrc: "/projects/react-socket/favicon.svg",
 	ogImage: "/og-image.png",
 	installCommand: "npm install @luciodale/react-socket",
 	githubUrl: "https://github.com/luciodale/react-socket",
