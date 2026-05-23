@@ -26,7 +26,7 @@
 		}
 	},
 	"description": "Type safe React hooks for real time WebSocket communication. Automatic reconnection, optimistic updates, ref counted subscriptions, and offline message queuing out of the box.",
-	"homepage": "https://koolcodez.com/projects/react-socket",
+	"homepage": "https://koolcodez.com/projects/react-socket/",
 	"bugs": {
 		"url": "https://github.com/luciodale/react-socket/issues"
 	},
