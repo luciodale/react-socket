@@ -67,9 +67,13 @@ export class MockTransport implements IWebSocketTransport {
 	}
 
 	// ── Simulation helpers ────────────────────────────────────────────
+	//
+	// Each helper enforces the real socket state machine so tests cannot
+	// exercise event sequences impossible in production.
 
-	/** Drive the transport into the OPEN state and fire `onopen`. */
+	/** Drive the transport into the OPEN state and fire `onopen`. No-op unless CONNECTING. */
 	simulateOpen(): void {
+		if (this.readyState !== WebSocket.CONNECTING) return;
 		this.readyState = WebSocket.OPEN;
 		this.onopen?.(new Event("open"));
 	}
@@ -77,9 +81,10 @@ export class MockTransport implements IWebSocketTransport {
 	/**
 	 * Close the connection. Defaults to code 1006 (abnormal close) so the
 	 * manager treats it as a drop and schedules a reconnect. Pass 1000 to
-	 * simulate a clean close.
+	 * simulate a clean close. No-op when already CLOSED.
 	 */
 	simulateClose(code: number = 1006, reason: string = ""): void {
+		if (this.readyState === WebSocket.CLOSED) return;
 		this.readyState = WebSocket.CLOSED;
 		const event = new CloseEvent("close", {
 			code,
@@ -89,13 +94,16 @@ export class MockTransport implements IWebSocketTransport {
 		this.onclose?.(event);
 	}
 
-	/** Deliver a server message frame to the manager. */
+	/** Deliver a server message frame to the manager. No-op unless OPEN. */
 	simulateMessage(data: string): void {
+		if (this.readyState !== WebSocket.OPEN) return;
 		const event = new MessageEvent("message", { data });
 		this.onmessage?.(event);
 	}
 
+	/** Fire `onerror`. No-op when CLOSED. */
 	simulateError(): void {
+		if (this.readyState === WebSocket.CLOSED) return;
 		this.onerror?.(new Event("error"));
 	}
 

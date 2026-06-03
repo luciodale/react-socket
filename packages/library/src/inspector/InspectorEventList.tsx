@@ -40,6 +40,8 @@ function formatEventSummary<TClientMsg, TServerMsg>(
 			return e.ackId;
 		case "in-flight-drop":
 			return `${e.ids.length} message(s)`;
+		case "ack-id-reuse":
+			return e.ackId;
 		case "pending-subscription-resolved":
 			return e.key;
 		case "reconnect-scheduled":

@@ -3,6 +3,11 @@ import type { IStorage } from "./storage";
 type TUndeliveredSyncConfig = {
 	storage: IStorage;
 	storageKey?: string;
+	/**
+	 * Called when a storage read/write fails. Without it the in-memory
+	 * queue silently stops being durable.
+	 */
+	onPersistError?: (error: unknown) => void;
 };
 
 const EMPTY: never[] = [];
@@ -10,13 +15,19 @@ const EMPTY: never[] = [];
 export function createUndeliveredSync<T extends { id: string }>(
 	config: TUndeliveredSyncConfig,
 ) {
-	const { storage, storageKey = "ws_undelivered_messages" } = config;
+	const {
+		storage,
+		storageKey = "ws_undelivered_messages",
+		onPersistError,
+	} = config;
 	let cache: Record<string, T[]> = {};
 	let initialized = false;
 	const listeners = new Set<() => void>();
 
 	function persist(): void {
-		storage.setItem(storageKey, JSON.stringify(cache)).catch(() => {});
+		storage.setItem(storageKey, JSON.stringify(cache)).catch((error) => {
+			onPersistError?.(error);
+		});
 	}
 
 	function notify(): void {
@@ -36,8 +47,9 @@ export function createUndeliveredSync<T extends { id: string }>(
 					cache = parsed as Record<string, T[]>;
 				}
 			}
-		} catch {
-			// Corrupted or unavailable — start empty
+		} catch (error) {
+			// Corrupted or unavailable — start empty.
+			onPersistError?.(error);
 		}
 		initialized = true;
 		notify();
@@ -99,7 +111,9 @@ export function createUndeliveredSync<T extends { id: string }>(
 
 		clearAll(): void {
 			cache = {};
-			storage.removeItem(storageKey).catch(() => {});
+			storage.removeItem(storageKey).catch((error) => {
+				onPersistError?.(error);
+			});
 			notify();
 		},
 	};

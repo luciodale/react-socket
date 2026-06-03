@@ -554,7 +554,7 @@ describe("WebSocketManager", () => {
 		});
 
 		it("acknowledges in-flight message via ackInFlight", () => {
-			const { manager, transport } = createManager();
+			const { manager, transport, droppedInFlightMaps } = createManager();
 			manager.connect();
 			transport.simulateOpen();
 
@@ -563,8 +563,42 @@ describe("WebSocketManager", () => {
 
 			// verify no in-flight drop on disconnect
 			transport.simulateClose(1006);
-			const { droppedInFlightMaps } = createManager();
 			expect(droppedInFlightMaps).toHaveLength(0);
+		});
+
+		it("drops an unacked in-flight message on disconnect (control for the ack test)", () => {
+			const { manager, transport, droppedInFlightMaps } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+
+			manager.send({ data: { text: "hello" }, ackId: "msg1" });
+			transport.simulateClose(1006);
+
+			expect(droppedInFlightMaps).toHaveLength(1);
+			expect(droppedInFlightMaps[0]).toEqual([
+				{ id: "msg1", data: { text: "hello" } },
+			]);
+		});
+
+		it("emits an ack-id-reuse debug event when an ackId is reused while in flight", () => {
+			const { manager, transport } = createManager();
+			const reuses: string[] = [];
+			manager.addDebugListener((event) => {
+				if (event.type === "ack-id-reuse") reuses.push(event.ackId);
+			});
+			manager.connect();
+			transport.simulateOpen();
+
+			manager.send({ data: { text: "a" }, ackId: "msg1" });
+			expect(reuses).toEqual([]);
+
+			manager.send({ data: { text: "b" }, ackId: "msg1" });
+			expect(reuses).toEqual(["msg1"]);
+
+			// After the ack clears the entry, the id is free to reuse.
+			manager.ackInFlight("msg1");
+			manager.send({ data: { text: "c" }, ackId: "msg1" });
+			expect(reuses).toEqual(["msg1"]);
 		});
 	});
 

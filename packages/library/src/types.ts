@@ -24,6 +24,12 @@ export type TIncomingData = string | ArrayBuffer | Blob;
 
 // ── Transport interface ─────────────────────────────────────────────
 
+/**
+ * Pluggable socket layer beneath `WebSocketManager`. Implementations must
+ * never deliver events from a superseded socket once `connect()` is called
+ * again or `disconnect()` runs — see `BrowserWebSocketTransport`'s
+ * per-socket guard.
+ */
 export interface IWebSocketTransport {
 	connect(url: string, protocols?: string | string[]): void;
 	disconnect(code?: number, reason?: string): void;
@@ -148,6 +154,7 @@ export type TDebugEventPayload<TClientMsg, TServerMsg> =
 	  }
 	| { type: "in-flight-ack"; ackId: string }
 	| { type: "in-flight-drop"; ids: string[] }
+	| { type: "ack-id-reuse"; ackId: string }
 	| { type: "pending-subscription-resolved"; key: string }
 	| { type: "reconnect-scheduled"; attempt: number; delayMs: number }
 	| { type: "ready"; restoredKeys: string[] }

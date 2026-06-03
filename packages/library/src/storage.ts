@@ -4,28 +4,20 @@ export interface IStorage {
 	removeItem(key: string): Promise<void>;
 }
 
+/**
+ * `localStorage` adapter for `IStorage`. Failures propagate as rejections
+ * so consumers can surface them (see `onPersistError`).
+ */
 export function createLocalStorage(): IStorage {
 	return {
 		async getItem(key) {
-			try {
-				return localStorage.getItem(key);
-			} catch {
-				return null;
-			}
+			return localStorage.getItem(key);
 		},
 		async setItem(key, value) {
-			try {
-				localStorage.setItem(key, value);
-			} catch {
-				// Storage full or unavailable
-			}
+			localStorage.setItem(key, value);
 		},
 		async removeItem(key) {
-			try {
-				localStorage.removeItem(key);
-			} catch {
-				// Storage unavailable
-			}
+			localStorage.removeItem(key);
 		},
 	};
 }

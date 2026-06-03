@@ -306,9 +306,10 @@ describe("useSocketReady", () => {
 			manager.subscribe("room:1", { type: "sub", key: "room:1" });
 			transport.simulateClose(1006);
 		});
-		// simulate reconnect + open -> ready fires with restored keys
+		// 2001ms covers base 1000ms + max 1000ms jitter so the reconnect
+		// timer has fired before simulateOpen.
 		act(() => {
-			vi.advanceTimersByTime(200);
+			vi.advanceTimersByTime(2001);
 			transport.simulateOpen();
 		});
 		expect(keysSeen[keysSeen.length - 1]).toEqual(["room:1"]);

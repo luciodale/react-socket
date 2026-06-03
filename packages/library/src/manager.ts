@@ -168,6 +168,12 @@ export class WebSocketManager<
 		)
 			return;
 
+		// Supersede any scheduled reconnect attempt.
+		if (this.reconnectTimer) {
+			clearTimeout(this.reconnectTimer);
+			this.reconnectTimer = null;
+		}
+
 		this.intentionalClose = false;
 		this.setConnectionState("connecting");
 
@@ -361,6 +367,10 @@ export class WebSocketManager<
 		const serialized = this.serialize(params.data);
 		const sent = this.rawSend(serialized);
 		if (sent && params.ackId) {
+			// Reuse while unacked overwrites the in-flight entry — surface it.
+			if (this.inFlightMessages.has(params.ackId)) {
+				this.emitDebug({ type: "ack-id-reuse", ackId: params.ackId });
+			}
 			this.inFlightMessages.set(params.ackId, params.data);
 		}
 		if (sent) {
@@ -487,11 +497,14 @@ export class WebSocketManager<
 		this.dropInFlight();
 
 		if (this.intentionalClose || this.disposed) {
+			// Terminal close: stop the dead socket firing stray events.
+			this.detachTransportHandlers();
 			this.setConnectionState("disconnected");
 			return;
 		}
 
 		if (event.code === 1000) {
+			this.detachTransportHandlers();
 			this.setConnectionState("disconnected");
 			return;
 		}
@@ -556,12 +569,14 @@ export class WebSocketManager<
 
 	private handleOffline(): void {
 		this.clearTimers();
+		// Supersede any in-flight dynamic url resolution.
+		this.connectAttemptId++;
+		// Settle state the bypassed handleClose would have settled.
+		this.clearPendingSubscriptions();
+		this.dropInFlight();
 		// Detach all transport handlers so a stale ws cannot fire close /
 		// open / message / error after we have moved on.
-		this.transport.onclose = null;
-		this.transport.onopen = null;
-		this.transport.onmessage = null;
-		this.transport.onerror = null;
+		this.detachTransportHandlers();
 		this.transport.disconnect(4000, "offline");
 		this.setConnectionState("reconnecting");
 	}
@@ -591,8 +606,20 @@ export class WebSocketManager<
 
 	// ── Private: reconnection ─────────────────────────────────────────
 
+	private detachTransportHandlers(): void {
+		this.transport.onclose = null;
+		this.transport.onopen = null;
+		this.transport.onmessage = null;
+		this.transport.onerror = null;
+	}
+
 	private scheduleReconnect(): void {
 		if (this.disposed) return;
+		// Cancel any pending timer so only one attempt is ever in flight.
+		if (this.reconnectTimer) {
+			clearTimeout(this.reconnectTimer);
+			this.reconnectTimer = null;
+		}
 		if (this.reconnectAttempt >= this.reconnectMaxAttempts) {
 			this.setConnectionState("disconnected");
 			return;
@@ -637,6 +664,8 @@ export class WebSocketManager<
 
 	private firePing(): void {
 		if (!this.ping) return;
+		// At most one outstanding ping/pong cycle at a time.
+		if (this.pongTimer) return;
 		const msg = this.ping();
 		const raw = this.serialize(msg);
 		this.rawSend(raw);
@@ -647,13 +676,35 @@ export class WebSocketManager<
 			deserialized: msg,
 		});
 		this.pongTimer = setTimeout(() => {
-			this.transport.disconnect(4000, "pong timeout");
+			this.pongTimer = null;
+			this.handlePongTimeout();
 		}, this.pongTimeoutMs);
+	}
+
+	private handlePongTimeout(): void {
+		if (this.disposed || this.intentionalClose) return;
+		// Drive teardown + reconnect directly: the transport swallows the
+		// close event for manager-initiated disconnects, so handleClose
+		// never runs on this path.
+		this.clearTimers();
+		this.clearPendingSubscriptions();
+		this.dropInFlight();
+		this.connectAttemptId++;
+		this.detachTransportHandlers();
+		this.transport.disconnect(4000, "pong timeout");
+		this.scheduleReconnect();
 	}
 
 	private startPingInterval(): void {
 		this.clearTimers();
 		if (!this.ping) return;
+		// Stay paused while hidden; handleVisibilityChange re-arms on resume.
+		if (
+			this.pauseHeartbeatWhenHidden &&
+			typeof document !== "undefined" &&
+			document.hidden
+		)
+			return;
 		this.pingTimer = setInterval(() => this.firePing(), this.pingIntervalMs);
 	}
 
