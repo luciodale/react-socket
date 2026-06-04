@@ -109,7 +109,7 @@ export class WebSocketManager<
 	>();
 
 	private protocols: string[] = [];
-	private connectionState: TConnectionState = "disconnected";
+	private connectionState: TConnectionState = "idle";
 	private reconnectAttempt = 0;
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	private pingTimer: ReturnType<typeof setInterval> | null = null;
@@ -232,7 +232,11 @@ export class WebSocketManager<
 		this.clearPendingSubscriptions();
 		this.dropInFlight();
 		this.transport.disconnect(1000, "client disconnect");
-		this.setConnectionState("disconnected");
+		// An idle manager was never started — disconnect() must not fabricate
+		// a transition. `idle` is exited only by connect()/forceReconnect().
+		if (this.connectionState !== "idle") {
+			this.setConnectionState("disconnected");
+		}
 		this.removeWindowListeners();
 	}
 

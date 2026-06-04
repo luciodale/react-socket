@@ -1,10 +1,11 @@
 // ── Connection state ────────────────────────────────────────────────
 
 export type TConnectionState =
-	| "disconnected"
-	| "connecting"
-	| "connected"
-	| "reconnecting";
+	// Initial only — `connect()` was never called on this manager. Never
+	// returned to: the sole exit is `idle → connecting`. Lets UI distinguish
+	// "not started" from "offline" (manual disconnect, clean close, or
+	// reconnect exhaustion — all of which are `disconnected`).
+	"idle" | "disconnected" | "connecting" | "connected" | "reconnecting";
 
 // ── Wire data ───────────────────────────────────────────────────────
 

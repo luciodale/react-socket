@@ -33,7 +33,8 @@ describe("useSocketConnectionState", () => {
 		const { manager, transport } = createTestManager();
 
 		const { result } = renderHook(() => useSocketConnectionState(manager));
-		expect(result.current).toBe("disconnected");
+		// "idle" until connect() is called — distinguishes "not started" from "offline"
+		expect(result.current).toBe("idle");
 
 		act(() => {
 			manager.connect();

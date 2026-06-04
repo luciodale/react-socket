@@ -32,7 +32,7 @@ afterEach(() => {
 
 describe("binary wire data", () => {
 	it("sends ArrayBuffer payloads through the transport", () => {
-		const transport = new MockTransport();
+		const transport = new MockTransport<ArrayBuffer>();
 		const manager = new WebSocketManager<
 			TBinaryClient,
 			TBinaryServer,
@@ -55,14 +55,14 @@ describe("binary wire data", () => {
 		expect(transport.sentMessages).toHaveLength(1);
 		const sent = transport.sentMessages[0];
 		expect(sent).toBeInstanceOf(ArrayBuffer);
-		expect(decodeMsg(sent as ArrayBuffer)).toEqual({
+		expect(decodeMsg(sent)).toEqual({
 			type: "payload",
 			size: 1024,
 		});
 	});
 
 	it("plumbs binaryType into the transport instance", () => {
-		const transport = new MockTransport();
+		const transport = new MockTransport<ArrayBuffer>();
 		new WebSocketManager<
 			TBinaryClient,
 			TBinaryServer,
@@ -81,7 +81,7 @@ describe("binary wire data", () => {
 	});
 
 	it("delivers ArrayBuffer messages to listeners", () => {
-		const transport = new MockTransport();
+		const transport = new MockTransport<ArrayBuffer>();
 		const received: TBinaryServer[] = [];
 
 		const manager = new WebSocketManager<
@@ -112,7 +112,7 @@ describe("binary wire data", () => {
 	});
 
 	it("supports mixed string + binary wire types via the union", () => {
-		const transport = new MockTransport();
+		const transport = new MockTransport<string | ArrayBuffer>();
 		type TMixedClient = { type: "text"; text: string } | { type: "blob" };
 		type TMixedServer = { type: "text"; text: string };
 
@@ -141,12 +141,17 @@ describe("binary wire data", () => {
 		manager.send({ data: { type: "blob" } });
 
 		expect(transport.sentMessages).toHaveLength(2);
-		expect(typeof transport.sentMessages[0]).toBe("string");
+		const textWire = transport.sentMessages[0];
+		expect(typeof textWire).toBe("string");
+		expect(JSON.parse(textWire as string)).toEqual({
+			type: "text",
+			text: "hello",
+		});
 		expect(transport.sentMessages[1]).toBeInstanceOf(ArrayBuffer);
 	});
 
 	it("emits deserialize-error with binary raw payload", () => {
-		const transport = new MockTransport();
+		const transport = new MockTransport<ArrayBuffer>();
 		const errors: { raw: ArrayBuffer | string; error: unknown }[] = [];
 
 		const manager = new WebSocketManager<

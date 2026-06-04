@@ -41,8 +41,9 @@
 		"lint:fix": "biome check --write .",
 		"unit-tests": "vitest",
 		"unit-tests:ci": "vitest run",
+		"typecheck:tests": "tsc -p packages/library/tsconfig.test.json",
 		"check:single-react": "bash scripts/check-single-react.sh",
-		"test": "bun run unit-tests:ci && bun run check:single-react"
+		"test": "bun run typecheck:tests && bun run unit-tests:ci && bun run check:single-react"
 	},
 	"workspaces": [
 		"packages/*"

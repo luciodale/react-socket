@@ -30,7 +30,7 @@ export const prerender = true;
 			react socket takes that layer off your plate. You define your message
 			types, wire up a few extractors, and the library handles socket
 			lifecycle, reconnection, keep alive, subscription management, and in
-			flight tracking. Eleven React hooks, one job each, give you everything
+			flight tracking. Twelve React hooks, one job each, give you everything
 			you need at the call site. No message switch, no imperative glue.
 		</p>
 	</ContentSection>
@@ -41,7 +41,7 @@ export const prerender = true;
 				{
 					highlight: "One way per concern",
 					description:
-						"Each hook has exactly one job. Send, subscribe, batch, react to an event, observe connection state, observe pending subscription — eleven hooks, zero overlap",
+						"Each hook has exactly one job. Send, subscribe, batch, react to an event, observe connection state, observe pending subscription — twelve hooks, zero overlap",
 					color: "accent",
 				},
 				{
@@ -132,7 +132,7 @@ export function Echo() {
 		</Callout>
 	</ContentSection>
 
-	<ContentSection label="The eleven hooks">
+	<ContentSection label="The twelve hooks">
 		<CodeBlock
 			code={`// React to an incoming message of a given type
 useSocketEvent(manager, "notification", (msg) => { ... });
@@ -170,7 +170,10 @@ useSocketReady(manager, (restoredKeys) => { ... });
 useSocketLastUnsubscribe(manager, (key, subscribePayload) => { ... });
 
 // Observable connection state
-const state = useSocketConnectionState(manager);`}
+const state = useSocketConnectionState(manager);
+
+// Fires on every connection state transition — clear ephemeral UI on drop
+useSocketConnectionChange(manager, (state, prev) => { ... });`}
 			language="tsx"
 			filename="hooks.ts"
 		/>
@@ -233,7 +236,8 @@ const state = useSocketConnectionState(manager);`}
 				<InlineCode>useSocketInFlightDrop</InlineCode>,
 				<InlineCode>useSocketReady</InlineCode>,
 				<InlineCode>useSocketLastUnsubscribe</InlineCode>,
-				<InlineCode>useSocketConnectionState</InlineCode>) — mount on any component, auto cleanup on unmount, latest handler without resubscribing. The default for React UI.
+				<InlineCode>useSocketConnectionState</InlineCode>,
+				<InlineCode>useSocketConnectionChange</InlineCode>) — mount on any component, auto cleanup on unmount, latest handler without resubscribing. The default for React UI.
 			</li>
 			<li>
 				<strong class="text-white/80">Listener methods</strong>

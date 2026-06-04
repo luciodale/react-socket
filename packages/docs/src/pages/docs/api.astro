@@ -12,7 +12,7 @@ export const prerender = true;
 <DocsPage title="API Reference">
 	<ContentSection label="API at a glance">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			react-socket exposes a single manager class and eleven React hooks. Each
+			react-socket exposes a single manager class and twelve React hooks. Each
 			hook has one job. You never need to write a message switch, never touch
 			an internal lifecycle method from user code, never manually wire a
 			<InlineCode>useEffect</InlineCode> around a subscribe call.
@@ -54,6 +54,9 @@ export const prerender = true;
 
   // Observable connection state
   useSocketConnectionState,
+
+  // Fires on every connection state transition — react without rendering
+  useSocketConnectionChange,
 } from "@luciodale/react-socket";`}
 			language="tsx"
 			filename="imports.ts"
@@ -326,9 +329,30 @@ function onSubmit(text: string) {
 		</p>
 		<CodeBlock
 			code={`const state = useSocketConnectionState(manager);
-// "disconnected" | "connecting" | "connected" | "reconnecting"`}
+// "idle" | "disconnected" | "connecting" | "connected" | "reconnecting"
+// "idle" = connect() never called — distinguishes "not started" from "offline"`}
 			language="tsx"
 			filename="useSocketConnectionState.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="useSocketConnectionChange">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			The event counterpart to
+			<InlineCode>useSocketConnectionState</InlineCode>: fires the handler
+			on every transition with the new and previous state, without
+			re-rendering the component. The right place to clear ephemeral UI
+			(typing indicators, live cursors, presence dots) the moment the
+			socket drops. Does not fire on mount. For "reconnected and
+			subscriptions restored" use <InlineCode>useSocketReady</InlineCode> —
+			this fires on the raw transition, before subscription replay.
+		</p>
+		<CodeBlock
+			code={`useSocketConnectionChange(manager, (state, prev) => {
+  if (state !== "connected") clearTypingIndicators();
+});`}
+			language="tsx"
+			filename="useSocketConnectionChange.tsx"
 		/>
 	</ContentSection>
 

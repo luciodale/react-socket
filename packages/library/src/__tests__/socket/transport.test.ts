@@ -7,6 +7,7 @@ class MockWebSocket {
 	static instances: MockWebSocket[] = [];
 	url: string;
 	protocols?: string | string[];
+	binaryType: "blob" | "arraybuffer" = "blob";
 	readyState: number = WebSocket.CONNECTING;
 	onopen: ((event: Event) => void) | null = null;
 	onclose: ((event: CloseEvent) => void) | null = null;
@@ -71,6 +72,24 @@ describe("BrowserWebSocketTransport", () => {
 		const ws = MockWebSocket.instances[0];
 		expect(ws.url).toBe("ws://localhost:8080");
 		expect(ws.protocols).toEqual(["proto1", "proto2"]);
+	});
+
+	it("propagates binaryType set before connect to the underlying socket", () => {
+		const transport = new BrowserWebSocketTransport();
+		transport.binaryType = "arraybuffer";
+		transport.connect("ws://localhost");
+
+		expect(MockWebSocket.instances).toHaveLength(1);
+		expect(MockWebSocket.instances[0].binaryType).toBe("arraybuffer");
+	});
+
+	it("leaves the underlying socket binaryType untouched when unset", () => {
+		const transport = new BrowserWebSocketTransport();
+		transport.connect("ws://localhost");
+
+		expect(MockWebSocket.instances).toHaveLength(1);
+		// default for a freshly constructed WebSocket, never overwritten
+		expect(MockWebSocket.instances[0].binaryType).toBe("blob");
 	});
 
 	it("forwards onopen from active socket", () => {
@@ -192,6 +211,49 @@ describe("BrowserWebSocketTransport", () => {
 			ws1.simulateError();
 			expect(handler).not.toHaveBeenCalled();
 		});
+
+		it("ignores onmessage from old socket after disconnect", () => {
+			const transport = new BrowserWebSocketTransport();
+			const handler = vi.fn();
+			transport.onmessage = handler;
+			transport.connect("ws://localhost");
+
+			const ws1 = MockWebSocket.instances[0];
+			transport.disconnect();
+
+			ws1.simulateMessage("stale");
+			expect(handler).not.toHaveBeenCalled();
+		});
+
+		it("ignores onerror from old socket after reconnect", () => {
+			const transport = new BrowserWebSocketTransport();
+			const handler = vi.fn();
+			transport.onerror = handler;
+			transport.connect("ws://localhost");
+
+			const ws1 = MockWebSocket.instances[0];
+			transport.connect("ws://localhost");
+			const ws2 = MockWebSocket.instances[1];
+
+			ws1.simulateError();
+			expect(handler).not.toHaveBeenCalled();
+
+			ws2.simulateError();
+			expect(handler).toHaveBeenCalledOnce();
+		});
+
+		it("ignores onopen from old socket after disconnect", () => {
+			const transport = new BrowserWebSocketTransport();
+			const handler = vi.fn();
+			transport.onopen = handler;
+			transport.connect("ws://localhost");
+
+			const ws1 = MockWebSocket.instances[0];
+			transport.disconnect();
+
+			ws1.simulateOpen();
+			expect(handler).not.toHaveBeenCalled();
+		});
 	});
 
 	describe("disconnect", () => {
@@ -204,11 +266,17 @@ describe("BrowserWebSocketTransport", () => {
 			expect(ws.closeCalls).toEqual([{ code: 1000, reason: "reason" }]);
 		});
 
-		it("readyState returns CLOSED after disconnect", () => {
+		it("readyState returns CLOSED after disconnect via the null-ws fallback", () => {
 			const transport = new BrowserWebSocketTransport();
 			transport.connect("ws://localhost");
+			const ws1 = MockWebSocket.instances[0];
 			transport.disconnect();
 
+			// Force the old captured socket to report OPEN. If readyState
+			// were still reading off the socket ref it would echo OPEN;
+			// it must instead use the WebSocket.CLOSED fallback because
+			// disconnect() nulled the internal ws ref.
+			ws1.readyState = WebSocket.OPEN;
 			expect(transport.readyState).toBe(WebSocket.CLOSED);
 		});
 

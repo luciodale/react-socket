@@ -18,6 +18,47 @@ export function useSocketConnectionState(
 	);
 }
 
+// ── useSocketConnectionChange ────────────────────────────────────────
+
+/**
+ * Fires on every connection state transition with the new and previous
+ * state. The event counterpart to `useSocketConnectionState`: use that
+ * one to RENDER the state, this one to REACT to a transition without
+ * re-rendering the component — clear ephemeral UI (typing indicators,
+ * live cursors, presence dots) the moment the socket drops, stop timers,
+ * pause animations.
+ *
+ * Does not fire on mount with the current state — only on transitions
+ * after mount. For "reconnected AND subscriptions restored" use
+ * `useSocketReady` instead; this fires on the raw transition, before
+ * subscription replay.
+ *
+ * @example
+ * ```tsx
+ * useSocketConnectionChange(manager, (state) => {
+ *   if (state !== "connected") clearTypingIndicators();
+ * });
+ * ```
+ */
+export function useSocketConnectionChange(
+	manager: TConnectionStateSource,
+	handler: (state: TConnectionState, prev: TConnectionState) => void,
+): void {
+	const handlerRef = useRef(handler);
+	handlerRef.current = handler;
+	useEffect(() => {
+		// `setConnectionState` only notifies on actual changes, so every
+		// emission is a real transition.
+		let prev = manager.getConnectionState();
+		return manager.addConnectionStateListener(() => {
+			const next = manager.getConnectionState();
+			const last = prev;
+			prev = next;
+			handlerRef.current(next, last);
+		});
+	}, [manager]);
+}
+
 // ── useSocketEvent ───────────────────────────────────────────────────
 
 // `discriminator` is exposed so TS can infer `TKey` from the manager

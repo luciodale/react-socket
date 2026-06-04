@@ -101,27 +101,6 @@ describe("useSocketEventBatch", () => {
 		expect(batches).toEqual([[1, 2], [3], [4, 5]]);
 	});
 
-	it("preserves event order within a batch", () => {
-		const { manager, transport } = createManager();
-		const seen: number[] = [];
-
-		renderHook(() =>
-			useSocketEventBatch(
-				manager,
-				"tick",
-				(msgs) => {
-					for (const m of msgs) seen.push(m.n);
-				},
-				{ flushMs: 30 },
-			),
-		);
-
-		for (let i = 0; i < 10; i += 1) pushTick(transport, i);
-		vi.advanceTimersByTime(30);
-
-		expect(seen).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
-	});
-
 	it("ignores events with a different discriminator value", () => {
 		const { manager, transport } = createManager();
 		const batches: Array<Array<{ type: "tick"; n: number }>> = [];
@@ -144,6 +123,48 @@ describe("useSocketEventBatch", () => {
 				{ type: "tick", n: 2 },
 			],
 		]);
+	});
+
+	it("discards a buffered event when the value changes and binds the new listener", () => {
+		const { manager, transport } = createManager();
+		const ticks: number[] = [];
+		const others: string[] = [];
+
+		const { rerender } = renderHook(
+			({ value }: { value: "tick" | "other" }) =>
+				useSocketEventBatch(
+					manager,
+					value,
+					(msgs) => {
+						for (const m of msgs) {
+							if (m.type === "tick") ticks.push(m.n);
+							else others.push(m.text);
+						}
+					},
+					{ flushMs: 50 },
+				),
+			{ initialProps: { value: "tick" } },
+		);
+
+		// Buffer a tick event but do NOT advance — it stays unflushed.
+		pushTick(transport, 7);
+
+		// Switch the value before the interval fires. The effect re-runs:
+		// old listener + its buffer are torn down, a fresh listener for the
+		// new value is bound.
+		rerender({ value: "other" });
+
+		// Advancing past flushMs must NOT surface the orphaned tick event.
+		vi.advanceTimersByTime(50);
+		expect(ticks).toEqual([]);
+		expect(others).toEqual([]);
+
+		// The new listener is live: an event for the new value is delivered.
+		transport.simulateMessage(JSON.stringify({ type: "other", text: "z" }));
+		vi.advanceTimersByTime(50);
+		expect(others).toEqual(["z"]);
+		// The dead tick listener never fires again.
+		expect(ticks).toEqual([]);
 	});
 
 	it("stops flushing after unmount and discards pending events", () => {
@@ -253,13 +274,19 @@ describe("useSocketEventBatch", () => {
 			);
 
 			// Push events faster than idleMs so the idle timer never fires.
+			// Each push lands 10ms apart, so over 60ms the 30ms interval fires
+			// exactly twice (t=30 and t=60), partitioning the stream cleanly.
 			for (let i = 0; i < 6; i += 1) {
 				pushTick(transport, i);
 				vi.advanceTimersByTime(10);
 			}
 
-			// Interval (30ms) flushed at least once during that 60ms window.
-			expect(batches.length).toBeGreaterThanOrEqual(1);
+			// Interval owns the cadence: two flushes, the first three then the
+			// last three. The idle timer never gets a 50ms gap to fire.
+			expect(batches).toEqual([
+				[0, 1, 2],
+				[3, 4, 5],
+			]);
 		});
 	});
 });

@@ -118,7 +118,7 @@ describe("useSocketConnectionState", () => {
     });
 
     const { result } = renderHook(() => useSocketConnectionState(manager));
-    expect(result.current).toBe("disconnected");
+    expect(result.current).toBe("idle"); // connect() not called yet
 
     act(() => {
       manager.connect();

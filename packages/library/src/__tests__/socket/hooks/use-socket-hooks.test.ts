@@ -1,6 +1,8 @@
 import { act, renderHook } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	useSocketConnectionChange,
 	useSocketEvent,
 	useSocketInFlightDrop,
 	useSocketLastUnsubscribe,
@@ -93,6 +95,64 @@ describe("useSocketEvent", () => {
 
 		expect(snapshots).toEqual([1, 2]);
 	});
+
+	it("swaps listeners when value changes — old value stops firing, new value starts", () => {
+		const { manager, transport } = createManager();
+		const received: string[] = [];
+
+		const { rerender } = renderHook(
+			({ value }: { value: "chat" | "subscribe-ack" }) =>
+				useSocketEvent(manager, value, (m) => {
+					// Tag by the discriminator so we can prove which listener fired.
+					received.push(m.type);
+				}),
+			{ initialProps: { value: "chat" as "chat" | "subscribe-ack" } },
+		);
+
+		// Subscribed to "chat": a chat msg fires, an ack does not.
+		act(() => {
+			transport.simulateMessage(JSON.stringify({ type: "chat", text: "hi" }));
+		});
+		expect(received).toEqual(["chat"]);
+
+		// Swap the discriminator value mid-flight.
+		rerender({ value: "subscribe-ack" });
+
+		// The old "chat" listener must be gone — a second chat msg is ignored
+		// (no double-fire from a leaked listener).
+		act(() => {
+			transport.simulateMessage(JSON.stringify({ type: "chat", text: "bye" }));
+		});
+		expect(received).toEqual(["chat"]);
+
+		// The new "subscribe-ack" listener is live.
+		act(() => {
+			transport.simulateMessage(
+				JSON.stringify({ type: "subscribe-ack", key: "a" }),
+			);
+		});
+		expect(received).toEqual(["chat", "subscribe-ack"]);
+	});
+
+	it("fires exactly once per message under StrictMode double-mount", () => {
+		const { manager, transport } = createManager();
+		const received: string[] = [];
+
+		renderHook(
+			() =>
+				useSocketEvent(manager, "chat", (m) => {
+					received.push(m.text);
+				}),
+			{ wrapper: StrictMode },
+		);
+
+		act(() => {
+			transport.simulateMessage(JSON.stringify({ type: "chat", text: "hi" }));
+		});
+
+		// Double-mount must not leak a second listener — one msg, one fire.
+		expect(received).toEqual(["hi"]);
+	});
 });
 
 describe("useSocketSubscription", () => {
@@ -182,6 +242,43 @@ describe("useSocketSubscription", () => {
 		);
 		expect(manager.getRefCount("room:1")).toBe(1);
 	});
+
+	it("moves the subscription when key changes — old key drops, new key subscribes", () => {
+		const { manager } = createManager();
+
+		const { rerender } = renderHook(
+			({ key }: { key: string }) =>
+				useSocketSubscription(manager, {
+					key,
+					subscribe: { type: "sub", key },
+				}),
+			{ initialProps: { key: "room:1" } },
+		);
+
+		expect(manager.getRefCount("room:1")).toBe(1);
+		expect(manager.getRefCount("room:2")).toBe(0);
+
+		rerender({ key: "room:2" });
+
+		expect(manager.getRefCount("room:1")).toBe(0);
+		expect(manager.getRefCount("room:2")).toBe(1);
+	});
+
+	it("holds refCount at exactly 1 under StrictMode double-mount", () => {
+		const { manager } = createManager();
+
+		renderHook(
+			() =>
+				useSocketSubscription(manager, {
+					key: "room:1",
+					subscribe: { type: "sub", key: "room:1" },
+				}),
+			{ wrapper: StrictMode },
+		);
+
+		// mount → unmount → remount must net to a single ref, not two.
+		expect(manager.getRefCount("room:1")).toBe(1);
+	});
 });
 
 describe("useSocketPendingSubscription", () => {
@@ -205,6 +302,35 @@ describe("useSocketPendingSubscription", () => {
 		});
 		expect(result.current).toBe(false);
 	});
+
+	it("re-reads pending state for the new key when the key prop changes", () => {
+		const { manager, transport } = createManager();
+
+		// Both keys subscribed while connected — both go pending awaiting ack.
+		act(() => {
+			manager.subscribe("room:1", { type: "sub", key: "room:1" });
+			manager.subscribe("room:2", { type: "sub", key: "room:2" });
+		});
+
+		const { result, rerender } = renderHook(
+			({ key }: { key: string }) => useSocketPendingSubscription(manager, key),
+			{ initialProps: { key: "room:1" } },
+		);
+		expect(result.current).toBe(true);
+
+		// Resolve only room:1.
+		act(() => {
+			transport.simulateMessage(
+				JSON.stringify({ type: "subscribe-ack", key: "room:1" }),
+			);
+		});
+		expect(result.current).toBe(false);
+
+		// Switching the watched key must re-read the snapshot for room:2,
+		// which is still pending.
+		rerender({ key: "room:2" });
+		expect(result.current).toBe(true);
+	});
 });
 
 describe("useSocketSend", () => {
@@ -219,6 +345,126 @@ describe("useSocketSend", () => {
 
 		const sent = transport.sentMessages.find((m) => m.includes('"hey"'));
 		expect(sent).toBeDefined();
+	});
+});
+
+describe("useSocketConnectionChange", () => {
+	it("fires on each transition with the new and previous state", () => {
+		const transport = new MockTransport();
+		const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+			url: "ws://test",
+			transport,
+			serialize: (msg) => JSON.stringify(msg),
+			deserialize: (raw) => JSON.parse(raw) as TServerMsg,
+			reconnectBaseDelayMs: 10,
+			reconnectMaxAttempts: 3,
+			reconnectMaxDelayMs: 100,
+		});
+		const transitions: { state: string; prev: string }[] = [];
+		renderHook(() =>
+			useSocketConnectionChange(manager, (state, prev) => {
+				transitions.push({ state, prev });
+			}),
+		);
+
+		// no fire on mount — only on transitions
+		expect(transitions).toHaveLength(0);
+
+		act(() => {
+			manager.connect();
+			transport.simulateOpen();
+		});
+		// dirty close: connected → reconnecting (1006 schedules a reconnect)
+		act(() => {
+			transport.simulateClose(1006);
+		});
+
+		expect(transitions).toEqual([
+			{ state: "connecting", prev: "idle" },
+			{ state: "connected", prev: "connecting" },
+			{ state: "reconnecting", prev: "connected" },
+		]);
+	});
+
+	it("clears ephemeral UI on drop and leaves it alone across a reconnect cycle", () => {
+		const { manager, transport } = createManager();
+		let typing: string | null = "BOB";
+		const transitions: string[] = [];
+		renderHook(() =>
+			useSocketConnectionChange(manager, (state, prev) => {
+				transitions.push(`${prev} → ${state}`);
+				// Clear ephemeral UI on every non-connected transition.
+				if (state !== "connected") typing = null;
+			}),
+		);
+
+		// A handler that fired on mount would have already nulled typing — prove
+		// it is still set before the first real transition.
+		expect(typing).toBe("BOB");
+		expect(transitions).toEqual([]);
+
+		// Drop: connected → reconnecting clears the indicator.
+		act(() => {
+			transport.simulateClose(1006);
+		});
+		expect(typing).toBeNull();
+
+		// Someone starts typing again while we are down.
+		typing = "ALICE";
+
+		// Reconnect: reconnecting → connected. The connected branch must NOT
+		// touch typing — a spurious clear here would null "ALICE".
+		act(() => {
+			vi.advanceTimersByTime(100);
+			transport.simulateOpen();
+		});
+		expect(typing).toBe("ALICE");
+
+		// Exactly one clear-triggering transition and one connected transition,
+		// in order — no mount fire, no duplicate emissions.
+		expect(transitions).toEqual([
+			"connected → reconnecting",
+			"reconnecting → connected",
+		]);
+	});
+
+	it("uses the latest handler without resubscribing", () => {
+		const { manager, transport } = createManager();
+		const seenBy: string[] = [];
+		const { rerender } = renderHook(
+			({ label }: { label: string }) =>
+				useSocketConnectionChange(manager, () => {
+					seenBy.push(label);
+				}),
+			{ initialProps: { label: "first" } },
+		);
+
+		act(() => {
+			transport.simulateClose(1006); // connected → reconnecting
+		});
+		rerender({ label: "second" });
+		act(() => {
+			manager.disconnect(); // reconnecting → disconnected
+		});
+
+		expect(seenBy).toEqual(["first", "second"]);
+	});
+
+	it("stops firing after unmount", () => {
+		const { manager, transport } = createManager();
+		const transitions: string[] = [];
+		const { unmount } = renderHook(() =>
+			useSocketConnectionChange(manager, (state) => {
+				transitions.push(state);
+			}),
+		);
+
+		unmount();
+		act(() => {
+			transport.simulateClose(1006);
+		});
+
+		expect(transitions).toHaveLength(0);
 	});
 });
 

@@ -44,7 +44,20 @@ export function createUndeliveredSync<T extends { id: string }>(
 					parsed !== null &&
 					!Array.isArray(parsed)
 				) {
-					cache = parsed as Record<string, T[]>;
+					// Validate per channel, not just the container: well-formed
+					// JSON with a non-array channel value (schema drift, key
+					// collision) must not poison the cache — getChannelMessages
+					// would return it as-is and addMessage would crash on it.
+					const entries = Object.entries(parsed as Record<string, unknown>);
+					const valid = entries.filter(([, value]) => Array.isArray(value));
+					if (valid.length !== entries.length) {
+						onPersistError?.(
+							new Error(
+								"undelivered-sync: dropped non-array channel values during hydration",
+							),
+						);
+					}
+					cache = Object.fromEntries(valid) as Record<string, T[]>;
 				}
 			}
 		} catch (error) {

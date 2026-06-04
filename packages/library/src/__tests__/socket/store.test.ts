@@ -1,4 +1,13 @@
-import { beforeEach, describe, expect, it } from "vitest";
+// Scope: this file covers manager→store WIRING patterns only — that the
+// WebSocketManager parses wire frames and fans them out (in order) to a
+// listener that drives a real external store, and that the inFlightDrop
+// listener is invoked (or not) by the manager lifecycle. The reducer that
+// maps frames onto store shape (delivery branches, channel keying, undelivered
+// transitions, cleanup) is APP code and is intentionally NOT pinned here;
+// per-listener manager behavior (deserialize, pong filtering, drop contents)
+// lives in manager.test.ts.
+
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "zustand";
 import { WebSocketManager } from "../../manager";
 import { MockTransport } from "../helpers/mock-transport";
@@ -12,7 +21,6 @@ type TMessage = {
 	sender: string;
 	content: TContentBlock[];
 	status: "pending" | "sent" | "undelivered";
-	undeliveredAt?: string;
 };
 
 type TTestState = {
@@ -31,22 +39,6 @@ type TServerMsg =
 			channel: string;
 			sender: string;
 			content: TContentBlock[];
-	  }
-	| {
-			action: "message";
-			type: "conversation";
-			delivery: "dump";
-			channel: string;
-			messages: { id: string; sender: string; content: TContentBlock[] }[];
-	  }
-	| {
-			action: "message";
-			type: "conversation";
-			delivery: "error";
-			channel: string;
-			error: string;
-			message: string;
-			messageId?: string;
 	  };
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -58,102 +50,31 @@ function createTestStore() {
 	return { useStore };
 }
 
+// Minimal app-side reducer: appends an event frame to its channel. This is the
+// consumer code the wiring drives — only the event branch is exercised here.
 function onMessage(
 	msg: TServerMsg,
 	useStore: ReturnType<typeof createTestStore>["useStore"],
 ) {
 	if (msg.action !== "message" || msg.type !== "conversation") return;
+	if (msg.delivery !== "event") return;
 
-	if (msg.delivery === "dump") {
-		useStore.setState((s) => ({
+	useStore.setState((s) => {
+		const existing = s.messages[msg.channel] ?? [];
+		return {
 			messages: {
 				...s.messages,
-				[msg.channel]: msg.messages.map((m) => ({
-					...m,
-					status: "sent" as const,
-				})),
+				[msg.channel]: [
+					...existing,
+					{
+						id: msg.id,
+						sender: msg.sender,
+						content: msg.content,
+						status: "sent" as const,
+					},
+				],
 			},
-		}));
-		return;
-	}
-
-	if (msg.delivery === "event") {
-		useStore.setState((s) => {
-			const existing = s.messages[msg.channel] ?? [];
-			const idx = existing.findIndex((m) => m.id === msg.id);
-
-			if (idx !== -1) {
-				const updated = [...existing];
-				const { undeliveredAt: _, ...rest } = updated[idx];
-				updated[idx] = { ...rest, status: "sent" };
-				return { messages: { ...s.messages, [msg.channel]: updated } };
-			}
-
-			return {
-				messages: {
-					...s.messages,
-					[msg.channel]: [
-						...existing,
-						{
-							id: msg.id,
-							sender: msg.sender,
-							content: msg.content,
-							status: "sent",
-						},
-					],
-				},
-			};
-		});
-		return;
-	}
-
-	if (msg.delivery === "error") {
-		useStore.setState((s) => {
-			if (!msg.messageId) return s;
-			const existing = s.messages[msg.channel] ?? [];
-			const idx = existing.findIndex((m) => m.id === msg.messageId);
-			if (idx === -1) return s;
-			const updated = [...existing];
-			updated[idx] = {
-				...updated[idx],
-				status: "undelivered",
-				undeliveredAt: new Date().toISOString(),
-			};
-			return { messages: { ...s.messages, [msg.channel]: updated } };
-		});
-	}
-}
-
-function onInFlightDrop(
-	messages: { id: string; data: TClientMsg }[],
-	useStore: ReturnType<typeof createTestStore>["useStore"],
-) {
-	for (const { id } of messages) {
-		useStore.setState((s) => {
-			for (const [channel, msgs] of Object.entries(s.messages)) {
-				const idx = msgs.findIndex((m) => m.id === id);
-				if (idx !== -1) {
-					const updated = [...msgs];
-					updated[idx] = {
-						...updated[idx],
-						status: "undelivered",
-						undeliveredAt: new Date().toISOString(),
-					};
-					return { messages: { ...s.messages, [channel]: updated } };
-				}
-			}
-			return s;
-		});
-	}
-}
-
-function onChannelCleanup(
-	channel: string,
-	useStore: ReturnType<typeof createTestStore>["useStore"],
-) {
-	useStore.setState((s) => {
-		const { [channel]: _, ...rest } = s.messages;
-		return { messages: rest };
+		};
 	});
 }
 
@@ -172,10 +93,6 @@ function createConnectedManager(
 		reconnectBaseDelayMs: 10,
 		reconnectMaxAttempts: 3,
 		reconnectMaxDelayMs: 100,
-	});
-
-	manager.addInFlightDropListener((messages) => {
-		onInFlightDrop(messages, useStore);
 	});
 
 	manager.addMessageListener((msg) => {
@@ -198,323 +115,113 @@ beforeEach(() => {
 });
 
 describe("store via addMessageListener", () => {
-	describe("event delivery", () => {
-		it("appends event to channel", () => {
-			const { transport } = createConnectedManager(useStore);
+	it("delivers a parsed frame to the listener-backed store", () => {
+		const { transport } = createConnectedManager(useStore);
 
-			transport.simulateMessage(
-				JSON.stringify({
-					action: "message",
-					type: "conversation",
-					delivery: "event",
-					id: "1",
-					channel: "ch1",
-					sender: "user",
-					content: [{ type: "text", text: "hi" }],
-				}),
-			);
-
-			const msgs = useStore.getState().messages.ch1;
-			expect(msgs).toHaveLength(1);
-			expect(msgs[0].id).toBe("1");
-			expect(msgs[0].status).toBe("sent");
-		});
-
-		it("appends to existing messages", () => {
-			const { transport } = createConnectedManager(useStore);
-
-			transport.simulateMessage(
-				JSON.stringify({
-					action: "message",
-					type: "conversation",
-					delivery: "event",
-					id: "1",
-					channel: "ch1",
-					sender: "user",
-					content: [{ type: "text", text: "hi" }],
-				}),
-			);
-			transport.simulateMessage(
-				JSON.stringify({
-					action: "message",
-					type: "conversation",
-					delivery: "event",
-					id: "2",
-					channel: "ch1",
-					sender: "bot",
-					content: [{ type: "text", text: "hello" }],
-				}),
-			);
-
-			expect(useStore.getState().messages.ch1).toHaveLength(2);
-		});
-
-		it("transitions pending message to sent on echo", () => {
-			useStore.setState({
-				messages: {
-					ch1: [
-						{
-							id: "opt-1",
-							sender: "user",
-							content: [{ type: "text", text: "retry" }],
-							status: "pending",
-						},
-					],
-				},
-			});
-
-			const { transport } = createConnectedManager(useStore);
-
-			transport.simulateMessage(
-				JSON.stringify({
-					action: "message",
-					type: "conversation",
-					delivery: "event",
-					id: "opt-1",
-					channel: "ch1",
-					sender: "user",
-					content: [{ type: "text", text: "retry" }],
-				}),
-			);
-
-			const msgs = useStore.getState().messages.ch1;
-			expect(msgs).toHaveLength(1);
-			expect(msgs[0]).toMatchObject({ id: "opt-1", status: "sent" });
-		});
-	});
-
-	describe("dump delivery", () => {
-		it("replaces channel messages with dump", () => {
-			const { transport } = createConnectedManager(useStore);
-
-			// seed existing
-			transport.simulateMessage(
-				JSON.stringify({
-					action: "message",
-					type: "conversation",
-					delivery: "event",
-					id: "old",
-					channel: "ch1",
-					sender: "user",
-					content: [{ type: "text", text: "old" }],
-				}),
-			);
-
-			// dump replaces
-			transport.simulateMessage(
-				JSON.stringify({
-					action: "message",
-					type: "conversation",
-					delivery: "dump",
-					channel: "ch1",
-					messages: [
-						{
-							id: "new1",
-							sender: "user",
-							content: [{ type: "text", text: "fresh" }],
-						},
-					],
-				}),
-			);
-
-			const msgs = useStore.getState().messages.ch1;
-			expect(msgs).toHaveLength(1);
-			expect(msgs[0].id).toBe("new1");
-			expect(msgs[0].status).toBe("sent");
-		});
-	});
-
-	describe("error delivery", () => {
-		it("marks message undelivered", () => {
-			useStore.setState({
-				messages: {
-					ch1: [
-						{
-							id: "msg-1",
-							sender: "user",
-							content: [{ type: "text", text: "hello" }],
-							status: "pending",
-						},
-					],
-				},
-			});
-
-			const { transport } = createConnectedManager(useStore);
-
-			transport.simulateMessage(
-				JSON.stringify({
-					action: "message",
-					type: "conversation",
-					delivery: "error",
-					channel: "ch1",
-					error: "token_expired",
-					message: "Token expired",
-					messageId: "msg-1",
-				}),
-			);
-
-			const msgs = useStore.getState().messages.ch1;
-			expect(msgs[0].status).toBe("undelivered");
-			expect(msgs[0].undeliveredAt).toBeDefined();
-		});
-
-		it("error without messageId is a no-op", () => {
-			useStore.setState({
-				messages: {
-					ch1: [
-						{
-							id: "msg-1",
-							sender: "user",
-							content: [{ type: "text", text: "hello" }],
-							status: "pending",
-						},
-					],
-				},
-			});
-
-			const { transport } = createConnectedManager(useStore);
-
-			transport.simulateMessage(
-				JSON.stringify({
-					action: "message",
-					type: "conversation",
-					delivery: "error",
-					channel: "ch1",
-					error: "general_error",
-					message: "something broke",
-				}),
-			);
-
-			expect(useStore.getState().messages.ch1[0].status).toBe("pending");
-		});
-	});
-
-	describe("channel isolation", () => {
-		it("messages from different channels do not interfere", () => {
-			const { transport } = createConnectedManager(useStore);
-
-			transport.simulateMessage(
-				JSON.stringify({
-					action: "message",
-					type: "conversation",
-					delivery: "event",
-					id: "1",
-					channel: "ch1",
-					sender: "user",
-					content: [{ type: "text", text: "ch1 msg" }],
-				}),
-			);
-
-			transport.simulateMessage(
-				JSON.stringify({
-					action: "message",
-					type: "conversation",
-					delivery: "event",
-					id: "2",
-					channel: "ch2",
-					sender: "user",
-					content: [{ type: "text", text: "ch2 msg" }],
-				}),
-			);
-
-			expect(useStore.getState().messages.ch1).toHaveLength(1);
-			expect(useStore.getState().messages.ch2).toHaveLength(1);
-		});
-	});
-
-	describe("non-message actions are ignored", () => {
-		it("subscribe_ack does not mutate store", () => {
-			const { transport } = createConnectedManager(useStore);
-
-			transport.simulateMessage(
-				JSON.stringify({
-					action: "subscribe_ack",
-					type: "conversation",
-					channel: "ch1",
-				}),
-			);
-
-			expect(useStore.getState().messages).toEqual({});
-		});
-	});
-});
-
-describe("onInFlightDrop callback", () => {
-	it("marks in-flight messages as undelivered on disconnect", () => {
-		useStore.setState({
-			messages: {
-				ch1: [
-					{
-						id: "msg1",
-						sender: "user",
-						content: [{ type: "text", text: "hello" }],
-						status: "pending",
-					},
-				],
-			},
-		});
-
-		const { manager, transport } = createConnectedManager(useStore);
-		manager.subscribe("conversation:ch1");
-
-		manager.send({
-			data: {
+		transport.simulateMessage(
+			JSON.stringify({
 				action: "message",
 				type: "conversation",
-				id: "msg1",
+				delivery: "event",
+				id: "1",
 				channel: "ch1",
-				message: "hello",
-			},
-			ackId: "msg1",
-		});
+				sender: "user",
+				content: [{ type: "text", text: "hi" }],
+			}),
+		);
 
-		transport.simulateClose(1006);
-
+		// The manager deserialized the wire frame and handed the typed object
+		// to the listener, which landed it in the store with full content.
 		const msgs = useStore.getState().messages.ch1;
-		expect(msgs[0].status).toBe("undelivered");
-		expect(msgs[0].undeliveredAt).toBeDefined();
-
-		manager.dispose();
+		expect(msgs).toHaveLength(1);
+		expect(msgs[0]).toEqual({
+			id: "1",
+			sender: "user",
+			content: [{ type: "text", text: "hi" }],
+			status: "sent",
+		});
 	});
 
-	it("does not fire when no in-flight messages exist", () => {
+	it("delivers multiple frames to the store in emit order", () => {
+		const { transport } = createConnectedManager(useStore);
+
+		transport.simulateMessage(
+			JSON.stringify({
+				action: "message",
+				type: "conversation",
+				delivery: "event",
+				id: "1",
+				channel: "ch1",
+				sender: "user",
+				content: [{ type: "text", text: "first" }],
+			}),
+		);
+		transport.simulateMessage(
+			JSON.stringify({
+				action: "message",
+				type: "conversation",
+				delivery: "event",
+				id: "2",
+				channel: "ch1",
+				sender: "bot",
+				content: [{ type: "text", text: "second" }],
+			}),
+		);
+
+		// Library guarantee: frames reach the listener in the order they
+		// arrived on the wire. Assert the store reflects that exact order with
+		// content, not just a count.
+		const msgs = useStore.getState().messages.ch1;
+		expect(msgs.map((m) => m.id)).toEqual(["1", "2"]);
+		expect(msgs.map((m) => m.content[0].text)).toEqual(["first", "second"]);
+	});
+
+	it("fans the same frame out to every registered message listener", () => {
 		const { manager, transport } = createConnectedManager(useStore);
+		const second = vi.fn();
+		manager.addMessageListener(second);
 
-		transport.simulateClose(1006);
+		transport.simulateMessage(
+			JSON.stringify({
+				action: "message",
+				type: "conversation",
+				delivery: "event",
+				id: "1",
+				channel: "ch1",
+				sender: "user",
+				content: [{ type: "text", text: "hi" }],
+			}),
+		);
 
-		expect(useStore.getState().messages).toEqual({});
-
-		manager.dispose();
+		// Both the store-backed listener and an additional listener receive the
+		// identical deserialized object.
+		expect(useStore.getState().messages.ch1).toHaveLength(1);
+		expect(second).toHaveBeenCalledTimes(1);
+		expect(second).toHaveBeenCalledWith({
+			action: "message",
+			type: "conversation",
+			delivery: "event",
+			id: "1",
+			channel: "ch1",
+			sender: "user",
+			content: [{ type: "text", text: "hi" }],
+		});
 	});
 });
 
-describe("onChannelCleanup callback", () => {
-	it("clears channel messages", () => {
-		useStore.setState({
-			messages: {
-				ch1: [
-					{
-						id: "1",
-						sender: "user",
-						content: [{ type: "text", text: "hi" }],
-						status: "sent",
-					},
-				],
-				ch2: [
-					{
-						id: "2",
-						sender: "bot",
-						content: [{ type: "text", text: "hey" }],
-						status: "sent",
-					},
-				],
-			},
-		});
+describe("onInFlightDrop wiring", () => {
+	it("does not invoke the drop listener when nothing is in flight", () => {
+		const { manager, transport } = createConnectedManager(useStore);
+		const onDrop = vi.fn();
+		manager.addInFlightDropListener(onDrop);
 
-		onChannelCleanup("ch1", useStore);
+		transport.simulateClose(1006);
 
-		const state = useStore.getState();
-		expect(state.messages.ch1).toBeUndefined();
-		expect(state.messages.ch2).toHaveLength(1);
+		// Pin the manager behavior directly via the listener spy rather than
+		// inferring it from an empty store: no in-flight messages → the drop
+		// listener is never called.
+		expect(onDrop).not.toHaveBeenCalled();
+
+		manager.dispose();
 	});
 });

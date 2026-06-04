@@ -1,4 +1,5 @@
 export {
+	useSocketConnectionChange,
 	useSocketConnectionState,
 	useSocketEvent,
 	useSocketEventBatch,

@@ -167,7 +167,7 @@ describe("computeSnapshotDiff", () => {
 		});
 	});
 
-	it("detects protocols changed", () => {
+	it("detects protocols changed by length", () => {
 		const prev = makeState({ protocols: ["v1"] });
 		const next = makeState({ protocols: ["v1", "v2"] });
 		const diff = computeSnapshotDiff(prev, next);
@@ -175,6 +175,47 @@ describe("computeSnapshotDiff", () => {
 			from: ["v1"],
 			to: ["v1", "v2"],
 		});
+	});
+
+	it("detects protocols changed by differing element at same length", () => {
+		const prev = makeState({ protocols: ["v1", "v2"] });
+		const next = makeState({ protocols: ["v1", "v3"] });
+		const diff = computeSnapshotDiff(prev, next);
+		expect(diff.protocols).toEqual({
+			from: ["v1", "v2"],
+			to: ["v1", "v3"],
+		});
+	});
+
+	it("detects subscriptionData present-undefined as changed (not absent)", () => {
+		const prev = makeState({
+			subscriptionData: new Map([["chat", { n: 1 }]]),
+		});
+		const next = makeState({
+			subscriptionData: new Map([["chat", undefined]]),
+		});
+		const diff = computeSnapshotDiff(prev, next);
+		expect(diff.subscriptionData.entries).toContainEqual({
+			key: "chat",
+			change: "changed",
+			from: { n: 1 },
+			to: undefined,
+		});
+		expect(diff.subscriptionData.entries).toHaveLength(1);
+	});
+
+	it("detects subscriptionData present-undefined as added when key absent in prev", () => {
+		const prev = makeState();
+		const next = makeState({
+			subscriptionData: new Map([["chat", undefined]]),
+		});
+		const diff = computeSnapshotDiff(prev, next);
+		expect(diff.subscriptionData.entries).toContainEqual({
+			key: "chat",
+			change: "added",
+			to: undefined,
+		});
+		expect(diff.subscriptionData.entries).toHaveLength(1);
 	});
 
 	it("returns null protocols when unchanged", () => {

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketManager } from "../../manager";
-import type { TConnectionState } from "../../types";
+import type { TConnectionState, TDebugEvent } from "../../types";
 import { MockTransport } from "../helpers/mock-transport";
 
 // ── Test types ──────────────────────────────────────────────────────
@@ -204,6 +204,123 @@ describe("WebSocketManager", () => {
 			manager.resolvePendingSubscription("conversation:ch1");
 			expect(manager.hasPendingSubscription("conversation:ch1")).toBe(false);
 		});
+
+		it("sends the unsubscribe frame on last unsubscribe while connected", () => {
+			const { manager, transport } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+			manager.subscribe("conversation:ch1", subMsg("conversation", "ch1"));
+			transport.sentMessages = [];
+
+			manager.unsubscribe("conversation:ch1", unsubMsg("conversation", "ch1"));
+
+			expect(transport.sentMessages).toHaveLength(1);
+			expect(JSON.parse(transport.sentMessages[0])).toEqual({
+				action: "unsubscribe",
+				type: "conversation",
+				channel: "ch1",
+			});
+		});
+
+		it("does not send the unsubscribe frame when disconnected (control)", () => {
+			const { manager, transport } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+			manager.subscribe("conversation:ch1", subMsg("conversation", "ch1"));
+
+			// Tear the socket down before the final unsubscribe — the frame must
+			// not be written while not connected.
+			manager.disconnect();
+			transport.sentMessages = [];
+
+			manager.unsubscribe("conversation:ch1", unsubMsg("conversation", "ch1"));
+
+			expect(transport.sentMessages).toHaveLength(0);
+		});
+
+		it("replays the first subscribe payload after reconnect (first-payload-wins)", () => {
+			const { manager, transport } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+
+			// Two subscribers for the same key with different payloads. The first
+			// payload is the one stored for replay; the second only bumps the ref.
+			manager.subscribe("conversation:ch1", {
+				action: "subscribe",
+				type: "conversation",
+				channel: "ch1",
+				payload: "A",
+			});
+			manager.subscribe("conversation:ch1", {
+				action: "subscribe",
+				type: "conversation",
+				channel: "ch1",
+				payload: "B",
+			});
+			transport.sentMessages = [];
+
+			manager.forceReconnect();
+			transport.simulateOpen();
+
+			const subs = transport.sentMessages.filter((m) =>
+				m.includes('"subscribe"'),
+			);
+			expect(subs).toHaveLength(1);
+			expect(JSON.parse(subs[0])).toEqual({
+				action: "subscribe",
+				type: "conversation",
+				channel: "ch1",
+				payload: "A",
+			});
+		});
+
+		it("subscribing before open replays exactly once on open", () => {
+			const { manager, transport } = createManager();
+			// Connect but do NOT open — the socket is still connecting.
+			manager.connect();
+
+			manager.subscribe("conversation:ch1", subMsg("conversation", "ch1"));
+			// Nothing is on the wire and nothing is marked pending while down.
+			expect(transport.sentMessages).toHaveLength(0);
+			expect(manager.hasPendingSubscription("conversation:ch1")).toBe(false);
+
+			transport.simulateOpen();
+
+			const subs = transport.sentMessages.filter((m) =>
+				m.includes('"subscribe"'),
+			);
+			expect(subs).toHaveLength(1);
+			expect(JSON.parse(subs[0])).toEqual({
+				action: "subscribe",
+				type: "conversation",
+				channel: "ch1",
+			});
+			expect(manager.hasPendingSubscription("conversation:ch1")).toBe(true);
+		});
+
+		it("unsubscribing a still-pending subscription clears the pending state", () => {
+			let pendingNotifications = 0;
+			const { manager, transport } = createManager();
+			manager.addPendingSubscriptionListener(() => {
+				pendingNotifications++;
+			});
+			manager.connect();
+			transport.simulateOpen();
+
+			manager.subscribe("conversation:ch1", subMsg("conversation", "ch1"));
+			expect(manager.hasPendingSubscription("conversation:ch1")).toBe(true);
+
+			pendingNotifications = 0;
+			// Drop the only subscriber while the subscription is still unresolved.
+			manager.unsubscribe("conversation:ch1");
+
+			expect(
+				manager.getSnapshot().pendingSubscriptions.has("conversation:ch1"),
+			).toBe(false);
+			// Clearing the pending entry must notify the pending-subscription
+			// listeners so dependent UI flips out of its loading state.
+			expect(pendingNotifications).toBe(1);
+		});
 	});
 
 	describe("reconnection", () => {
@@ -233,7 +350,14 @@ describe("WebSocketManager", () => {
 			const subs = transport.sentMessages.filter((m) =>
 				m.includes('"subscribe"'),
 			);
-			expect(subs.length).toBeGreaterThanOrEqual(1);
+			expect(subs).toHaveLength(1);
+			// The replayed frame must carry the original subscribe payload, not
+			// just any subscribe-shaped message.
+			expect(JSON.parse(subs[0])).toEqual({
+				action: "subscribe",
+				type: "conversation",
+				channel: "ch1",
+			});
 		});
 
 		it("gives up after max attempts and transitions to disconnected", () => {
@@ -282,7 +406,11 @@ describe("WebSocketManager", () => {
 				}
 			}
 
-			expect(states[states.length - 1]).not.toBe("disconnected");
+			// Unbounded retries must keep cycling the live states — never the
+			// terminal "disconnected", never back to the initial "idle".
+			expect(["connecting", "reconnecting", "connected"]).toContain(
+				states[states.length - 1],
+			);
 			expect(transport.connectCalls.length).toBeGreaterThan(10);
 		});
 	});
@@ -543,7 +671,7 @@ describe("WebSocketManager", () => {
 		});
 
 		it("sends with null id (fire-and-forget)", () => {
-			const { manager, transport } = createManager();
+			const { manager, transport, droppedInFlightMaps } = createManager();
 			manager.connect();
 			transport.simulateOpen();
 			transport.sentMessages = [];
@@ -551,6 +679,11 @@ describe("WebSocketManager", () => {
 			const sent = manager.send({ data: { text: "hello" } });
 			expect(sent).toBe(true);
 			expect(transport.sentMessages).toHaveLength(1);
+
+			// A null-id send is fire-and-forget: it must not be tracked in flight,
+			// so a subsequent drop on disconnect fires no inFlightDrop listener.
+			transport.simulateClose(1006);
+			expect(droppedInFlightMaps).toHaveLength(0);
 		});
 
 		it("acknowledges in-flight message via ackInFlight", () => {
@@ -654,6 +787,52 @@ describe("WebSocketManager", () => {
 				data: { action: "message" },
 				ackId: "msg-1",
 			});
+		});
+	});
+
+	describe("idle initial state", () => {
+		it("starts as idle before connect() is ever called", () => {
+			const { manager } = createManager();
+			expect(manager.getConnectionState()).toBe("idle");
+		});
+
+		it("exits idle only via connect(): idle -> connecting", () => {
+			const { manager, states } = createManager();
+			manager.connect();
+			expect(states[0]).toBe("connecting");
+			expect(manager.getConnectionState()).toBe("connecting");
+		});
+
+		it("disconnect() on an idle manager stays idle and emits no transition", () => {
+			const { manager, states } = createManager();
+			manager.disconnect();
+			expect(manager.getConnectionState()).toBe("idle");
+			expect(states).toHaveLength(0);
+		});
+
+		it("never returns to idle: disconnect() after connect lands on disconnected", () => {
+			const { manager, transport } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+			manager.disconnect();
+			expect(manager.getConnectionState()).toBe("disconnected");
+		});
+
+		it("forceReconnect() also exits idle: idle -> connecting -> connected", () => {
+			const { manager, transport, states } = createManager();
+			manager.forceReconnect();
+			transport.simulateOpen();
+			expect(states).toEqual(["connecting", "connected"]);
+			expect(transport.connectCalls).toHaveLength(1);
+		});
+
+		it("dispose() on an idle manager stays idle, emits no transition, and is terminal", () => {
+			const { manager, states } = createManager();
+			manager.dispose();
+			expect(manager.getConnectionState()).toBe("idle");
+			expect(states).toHaveLength(0);
+			expect(manager.getSnapshot().disposed).toBe(true);
+			expect(() => manager.connect()).toThrow(/disposed/);
 		});
 	});
 
@@ -885,6 +1064,33 @@ describe("WebSocketManager", () => {
 
 			transport.simulateMessage("not json{{{");
 			expect(rawMessages).toHaveLength(0);
+		});
+	});
+
+	describe("custom discriminator", () => {
+		it("dispatches keyed listeners by the configured discriminator field", () => {
+			type TKindMsg = { kind: string } & Record<string, unknown>;
+			const transport = new MockTransport();
+			const manager = new WebSocketManager<TTestClientMsg, TKindMsg, "kind">({
+				serialize: (msg: TTestClientMsg) => JSON.stringify(msg),
+				deserialize: (raw: string) => JSON.parse(raw) as TKindMsg,
+				url: "ws://test",
+				transport,
+				discriminator: "kind",
+			});
+			const aMessages: TKindMsg[] = [];
+			manager.addEventListener("a", (msg) => aMessages.push(msg));
+			manager.connect();
+			transport.simulateOpen();
+
+			transport.simulateMessage(JSON.stringify({ kind: "a", n: 1 }));
+			expect(aMessages).toHaveLength(1);
+			expect(aMessages[0]).toEqual({ kind: "a", n: 1 });
+
+			// A message whose discriminator value does not match the listener
+			// key must not reach it.
+			transport.simulateMessage(JSON.stringify({ kind: "b", n: 2 }));
+			expect(aMessages).toHaveLength(1);
 		});
 	});
 
@@ -1138,6 +1344,63 @@ describe("WebSocketManager", () => {
 
 			expect(transport.connectCalls.length).toBe(callsBefore);
 		});
+
+		it("online is a no-op while already connected", () => {
+			const { manager, transport } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+			expect(manager.getConnectionState()).toBe("connected");
+
+			const callsBefore = transport.connectCalls.length;
+			window.dispatchEvent(new Event("online"));
+			// Advance past the max backoff window — a stray reconnect would have
+			// fired by now.
+			vi.advanceTimersByTime(200);
+
+			expect(transport.connectCalls).toHaveLength(callsBefore);
+			expect(manager.getConnectionState()).toBe("connected");
+		});
+
+		it("online is a no-op while still connecting", () => {
+			const { manager, transport } = createManager();
+			manager.connect();
+			expect(manager.getConnectionState()).toBe("connecting");
+
+			const callsBefore = transport.connectCalls.length;
+			window.dispatchEvent(new Event("online"));
+			vi.advanceTimersByTime(200);
+
+			expect(transport.connectCalls).toHaveLength(callsBefore);
+			expect(manager.getConnectionState()).toBe("connecting");
+		});
+
+		it("offline detaches the live close handler so a stale drop is inert", () => {
+			const { manager, transport } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+
+			// Capture the live close handler installed on the socket.
+			const liveOnclose = transport.onclose;
+			expect(liveOnclose).not.toBeNull();
+
+			window.dispatchEvent(new Event("offline"));
+			expect(manager.getConnectionState()).toBe("reconnecting");
+
+			// handleOffline detaches all transport handlers and closes the
+			// socket. A stale drop arriving through the transport surface (the
+			// only path the real transport exposes — guarded by the live socket
+			// ref) must therefore be inert: onclose is nulled and the socket is
+			// already CLOSED, so simulateClose does nothing.
+			expect(transport.onclose).toBeNull();
+			const callsBefore = transport.connectCalls.length;
+			transport.simulateClose(1006);
+
+			// handleOffline arms no reconnect timer (it waits for `online`), so the
+			// stale close must not schedule one and the state stays reconnecting.
+			vi.advanceTimersByTime(200);
+			expect(transport.connectCalls.length).toBe(callsBefore);
+			expect(manager.getConnectionState()).toBe("reconnecting");
+		});
 	});
 
 	describe("edge cases", () => {
@@ -1153,11 +1416,21 @@ describe("WebSocketManager", () => {
 		});
 
 		it("unsubscribe when not subscribed is no-op", () => {
-			const { manager } = createManager();
+			const lastUnsubKeys: string[] = [];
+			const { manager, transport } = createManager({
+				onLastUnsubscribe: (key) => lastUnsubKeys.push(key),
+			});
+			manager.connect();
+			transport.simulateOpen();
+			transport.sentMessages = [];
 
 			manager.unsubscribe("nonexistent", unsubMsg("conversation", "x"));
 
 			expect(manager.getRefCount("nonexistent")).toBe(0);
+			// A ref count that never went above 0 means no wire frame and no
+			// last-unsubscribe notification.
+			expect(transport.sentMessages).toHaveLength(0);
+			expect(lastUnsubKeys).toHaveLength(0);
 		});
 
 		it("throws when connect is called after dispose", () => {
@@ -1223,6 +1496,18 @@ describe("WebSocketManager", () => {
 			transport.simulateOpen();
 
 			expect(transport.sentMessages).toHaveLength(2);
+			// Both subscriptions must replay with their original payloads.
+			const restored = transport.sentMessages.map((m) => JSON.parse(m));
+			expect(restored).toContainEqual({
+				action: "subscribe",
+				type: "conversation",
+				channel: "ch1",
+			});
+			expect(restored).toContainEqual({
+				action: "subscribe",
+				type: "conversation",
+				channel: "ch2",
+			});
 		});
 
 		it("drops in-flight messages", () => {
@@ -1294,17 +1579,84 @@ describe("WebSocketManager", () => {
 			expect(states[states.length - 1]).toBe("reconnecting");
 		});
 
+		it("revives a manager that exhausted its reconnect attempts", () => {
+			const { manager, transport, states } = createManager({
+				reconnectBaseDelayMs: 10,
+				reconnectMaxAttempts: 2,
+			});
+			manager.connect();
+			transport.simulateOpen();
+
+			// Drop the connection and fail every scheduled reconnect until the
+			// attempt budget is exhausted and the manager gives up.
+			transport.simulateClose(1006);
+			for (
+				let i = 0;
+				i < 8 && manager.getConnectionState() !== "disconnected";
+				i++
+			) {
+				const callsBefore = transport.connectCalls.length;
+				vi.advanceTimersByTime(200);
+				if (transport.connectCalls.length > callsBefore) {
+					transport.simulateClose(1006);
+				}
+			}
+			expect(manager.getConnectionState()).toBe("disconnected");
+
+			// forceReconnect must reset the exhausted counter and start a fresh
+			// connect — proving the reset is what brings a dead manager back.
+			const callsBefore = transport.connectCalls.length;
+			states.length = 0;
+			manager.forceReconnect();
+
+			expect(manager.getConnectionState()).toBe("connecting");
+			expect(states).toContain("connecting");
+			expect(transport.connectCalls.length).toBe(callsBefore + 1);
+			// The counter reset happens at forceReconnect time, before the socket
+			// opens — so even a drop BEFORE handleOpen (which would otherwise reset
+			// it) must schedule a reconnect rather than jump straight back to the
+			// exhausted "disconnected" state.
+			expect(manager.getSnapshot().reconnectAttempt).toBe(0);
+			transport.simulateClose(1006);
+			expect(manager.getConnectionState()).toBe("reconnecting");
+
+			// And the revived connection still opens cleanly on the next attempt.
+			vi.advanceTimersByTime(200);
+			transport.simulateOpen();
+			expect(manager.getConnectionState()).toBe("connected");
+		});
+
 		it("nullifies old handlers to prevent stale events", () => {
 			const { manager, transport, states } = createManager();
 			manager.connect();
 			transport.simulateOpen();
 
+			// Capture the live handler refs BEFORE forceReconnect so we can prove
+			// they were swapped out, not reused.
+			const oldOnclose = transport.onclose;
+			const oldOnopen = transport.onopen;
+			const oldOnmessage = transport.onmessage;
+			const oldOnerror = transport.onerror;
+			expect(oldOnclose).not.toBeNull();
+			expect(oldOnopen).not.toBeNull();
+			expect(oldOnmessage).not.toBeNull();
+			expect(oldOnerror).not.toBeNull();
+
 			manager.forceReconnect();
 
-			// Simulate the old connection's delayed close event
-			// Transport handlers were nullified, so this should be a no-op
-			expect(transport.onclose).not.toBeNull(); // new handler from connect()
+			// forceReconnect tears down the old socket (handlers nullified during
+			// teardown) and reinstalls a fresh set for the new connection. The new
+			// handlers must be distinct references, proving the swap happened — a
+			// stale socket holding the old refs can no longer route into the
+			// manager's current connection.
+			expect(transport.onclose).not.toBeNull();
 			expect(transport.onopen).not.toBeNull();
+			expect(transport.onmessage).not.toBeNull();
+			expect(transport.onerror).not.toBeNull();
+			expect(transport.onclose).not.toBe(oldOnclose);
+			expect(transport.onopen).not.toBe(oldOnopen);
+			expect(transport.onmessage).not.toBe(oldOnmessage);
+			expect(transport.onerror).not.toBe(oldOnerror);
 
 			// The new connection should work normally
 			transport.simulateOpen();
@@ -1485,7 +1837,8 @@ describe("WebSocketManager", () => {
 
 		it("supersedes stale url resolution on forceReconnect", async () => {
 			const transport = new MockTransport();
-			const pendings: Array<(url: string) => void> = [];
+			// Each entry resolves its captured url; the calls take no args.
+			const pendings: Array<() => void> = [];
 			const urls: string[] = ["ws://test?token=stale", "ws://test?token=fresh"];
 			let callIndex = 0;
 			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
@@ -1555,20 +1908,30 @@ describe("WebSocketManager", () => {
 
 	describe("transport-error debug event", () => {
 		it("emits transport-error when the transport fires onerror", () => {
-			const debugEvents: string[] = [];
+			const debugEvents: TDebugEvent<TTestClientMsg, TTestServerMsg>[] = [];
 			const transport = new MockTransport();
 			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
 				...testSerialization,
 				url: "ws://test",
 				transport,
-				onDebug: (e) => debugEvents.push(e.type),
+				onDebug: (e) => debugEvents.push(e),
 			});
 
 			manager.connect();
 			transport.simulateOpen();
 			transport.simulateError();
 
-			expect(debugEvents).toContain("transport-error");
+			const errorEvents = debugEvents.filter(
+				(e) => e.type === "transport-error",
+			);
+			expect(errorEvents).toHaveLength(1);
+			// transport-error carries no extra payload beyond the envelope
+			// (type + monotonic id + timestamp) — assert the full shape.
+			const event = errorEvents[0];
+			expect(event.type).toBe("transport-error");
+			expect(typeof event.id).toBe("number");
+			expect(typeof event.timestamp).toBe("number");
+			expect(Object.keys(event).sort()).toEqual(["id", "timestamp", "type"]);
 		});
 	});
 });

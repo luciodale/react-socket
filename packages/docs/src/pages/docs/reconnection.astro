@@ -181,6 +181,7 @@ function ConnectionStatus() {
   const state = useSocketConnectionState(manager);
 
   const labels = {
+    idle: "Not connected",
     disconnected: "Offline",
     connecting: "Connecting...",
     connected: "Connected",

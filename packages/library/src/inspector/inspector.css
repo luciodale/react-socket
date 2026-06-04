@@ -85,6 +85,10 @@
 	flex-shrink: 0;
 }
 
+.rsi-connection-dot[data-state="idle"] {
+	background: transparent;
+	border: 1px solid var(--rsi-text-tertiary);
+}
 .rsi-connection-dot[data-state="disconnected"] {
 	background: var(--rsi-text-tertiary);
 }

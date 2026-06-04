@@ -15,6 +15,11 @@ export type TDisconnectCall = {
  * so it can be passed to `WebSocketManager` in place of the real browser
  * transport.
  *
+ * `TWire` mirrors the manager's wire type and defaults to `string` (the
+ * manager's own default), so `sentMessages` is `string[]` in the common
+ * case. Widen it to match a binary manager:
+ * `new MockTransport<string | ArrayBuffer>()`.
+ *
  * ```ts
  * const transport = new MockTransport();
  * const manager = new WebSocketManager({
@@ -30,7 +35,9 @@ export type TDisconnectCall = {
  * expect(transport.sentMessages).toContain(...);
  * ```
  */
-export class MockTransport implements IWebSocketTransport {
+export class MockTransport<TWire extends TWireData = string>
+	implements IWebSocketTransport
+{
 	onopen: ((event: Event) => void) | null = null;
 	onclose: ((event: CloseEvent) => void) | null = null;
 	onmessage: ((event: MessageEvent) => void) | null = null;
@@ -44,10 +51,11 @@ export class MockTransport implements IWebSocketTransport {
 	connectCalls: TConnectCall[] = [];
 
 	/**
-	 * Every payload passed to `send(data)` in order. Type widens to the full
-	 * WebSocket-acceptable union when the manager runs in binary mode.
+	 * Every payload passed to `send(data)` in order. Typed as the mock's
+	 * `TWire` parameter (default `string`); widen the parameter when the
+	 * manager runs in binary mode.
 	 */
-	sentMessages: TWireData[] = [];
+	sentMessages: TWire[] = [];
 
 	/** Every `disconnect(code?, reason?)` call captured in order. */
 	disconnectCalls: TDisconnectCall[] = [];
@@ -63,7 +71,9 @@ export class MockTransport implements IWebSocketTransport {
 	}
 
 	send(data: TWireData): void {
-		this.sentMessages.push(data);
+		// The interface accepts the full union; the manager's serialize only
+		// ever produces its own TWire, which the test declares via the param.
+		this.sentMessages.push(data as TWire);
 	}
 
 	// ── Simulation helpers ────────────────────────────────────────────
@@ -117,6 +127,8 @@ export class MockTransport implements IWebSocketTransport {
 }
 
 /** Factory for `MockTransport`. Equivalent to `new MockTransport()`. */
-export function createMockTransport(): MockTransport {
-	return new MockTransport();
+export function createMockTransport<
+	TWire extends TWireData = string,
+>(): MockTransport<TWire> {
+	return new MockTransport<TWire>();
 }

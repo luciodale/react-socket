@@ -138,7 +138,7 @@ describe("WebSocketManager debug events", () => {
 			const stateEvents = eventsOfType(events, "connection-state-change");
 			expect(stateEvents).toHaveLength(2);
 			expect(stateEvents[0]).toMatchObject({
-				from: "disconnected",
+				from: "idle",
 				to: "connecting",
 			});
 			expect(stateEvents[1]).toMatchObject({
@@ -213,7 +213,18 @@ describe("WebSocketManager debug events", () => {
 
 	describe("deserialize-error events", () => {
 		it("emits when deserialization fails", () => {
-			const { manager, transport, events } = createManager();
+			const transport = new MockTransport();
+			const events: TDebugEvent<TTestClientMsg, TTestServerMsg>[] = [];
+			const thrown = new Error("boom deserialize");
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				url: "ws://test",
+				transport,
+				serialize: testSerialization.serialize,
+				deserialize: () => {
+					throw thrown;
+				},
+				onDebug: (e) => events.push(e),
+			});
 			manager.connect();
 			transport.simulateOpen();
 
@@ -222,7 +233,8 @@ describe("WebSocketManager debug events", () => {
 			const errEvents = eventsOfType(events, "deserialize-error");
 			expect(errEvents).toHaveLength(1);
 			expect(errEvents[0].raw).toBe("not valid json{{{");
-			expect(errEvents[0].error).toBeDefined();
+			// The thrown error must reach the event untouched, by identity.
+			expect(errEvents[0].error).toBe(thrown);
 		});
 	});
 
@@ -247,11 +259,14 @@ describe("WebSocketManager debug events", () => {
 			manager.connect();
 			transport.simulateOpen();
 
-			manager.send({ data: { text: "fire" } });
+			const data = { text: "fire" };
+			manager.send({ data });
 
 			const sentEvents = eventsOfType(events, "message-sent");
 			expect(sentEvents).toHaveLength(1);
 			expect(sentEvents[0].ackId).toBeUndefined();
+			expect(sentEvents[0].raw).toBe(JSON.stringify(data));
+			expect(sentEvents[0].deserialized).toEqual(data);
 		});
 
 		it("does NOT emit when not connected", () => {
@@ -469,7 +484,21 @@ describe("WebSocketManager debug events", () => {
 
 	describe("reconnect-scheduled events", () => {
 		it("emits with attempt and delayMs", () => {
-			const { manager, transport, events } = createManager();
+			// base=200, maxDelay large enough that the cap never clamps the
+			// first attempt's jittered delay, so the [base, base+1000] window
+			// is exactly what the math produces.
+			const transport = new MockTransport();
+			const events: TDebugEvent<TTestClientMsg, TTestServerMsg>[] = [];
+			const base = 200;
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+				reconnectBaseDelayMs: base,
+				reconnectMaxDelayMs: 10_000,
+				reconnectMaxAttempts: 3,
+				onDebug: (e) => events.push(e),
+			});
 			manager.connect();
 			transport.simulateOpen();
 			transport.simulateClose(1006);
@@ -478,7 +507,87 @@ describe("WebSocketManager debug events", () => {
 			expect(reconnectEvents).toHaveLength(1);
 			expect(reconnectEvents[0].attempt).toBe(1);
 			expect(typeof reconnectEvents[0].delayMs).toBe("number");
-			expect(reconnectEvents[0].delayMs).toBeGreaterThanOrEqual(0);
+			// attempt 1 => base*2^0 + jitter(0..1000), uncapped.
+			expect(reconnectEvents[0].delayMs).toBeGreaterThanOrEqual(base);
+			expect(reconnectEvents[0].delayMs).toBeLessThanOrEqual(base + 1000);
+		});
+
+		it("grows the backoff exponentially with incrementing attempts", () => {
+			// Ping-less manager so the only timers are reconnect timers, and a
+			// maxDelay large enough that the cap never clamps these attempts.
+			const transport = new MockTransport();
+			const events: TDebugEvent<TTestClientMsg, TTestServerMsg>[] = [];
+			const base = 100;
+			const maxDelay = 10_000;
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+				reconnectBaseDelayMs: base,
+				reconnectMaxDelayMs: maxDelay,
+				reconnectMaxAttempts: 10,
+				onDebug: (e) => events.push(e),
+			});
+
+			manager.connect();
+			transport.simulateOpen();
+
+			// Drive abnormal closes. Each scheduled reconnect timer fires when we
+			// advance past maxDelay; the re-attached handlers then let the next
+			// 1006 close schedule the following attempt. simulateOpen is never
+			// called between closes, so reconnectAttempt keeps climbing.
+			for (let i = 0; i < 5; i++) {
+				transport.simulateClose(1006);
+				vi.advanceTimersByTime(maxDelay);
+			}
+
+			const reconnectEvents = eventsOfType(events, "reconnect-scheduled");
+			expect(reconnectEvents).toHaveLength(5);
+
+			reconnectEvents.forEach((event, index) => {
+				const attempt = index + 1;
+				const floor = base * 2 ** (attempt - 1);
+				expect(event.attempt).toBe(attempt);
+				expect(event.delayMs).toBeGreaterThanOrEqual(floor);
+				expect(event.delayMs).toBeLessThanOrEqual(floor + 1000);
+			});
+		});
+
+		it("caps the backoff at reconnectMaxDelayMs", () => {
+			// With a tiny maxDelay the exponential floor quickly exceeds the cap,
+			// so every scheduled delay must clamp to maxDelay.
+			const transport = new MockTransport();
+			const events: TDebugEvent<TTestClientMsg, TTestServerMsg>[] = [];
+			const maxDelay = 150;
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+				reconnectBaseDelayMs: 100,
+				reconnectMaxDelayMs: maxDelay,
+				reconnectMaxAttempts: 10,
+				onDebug: (e) => events.push(e),
+			});
+
+			manager.connect();
+			transport.simulateOpen();
+
+			for (let i = 0; i < 5; i++) {
+				transport.simulateClose(1006);
+				vi.advanceTimersByTime(maxDelay);
+			}
+
+			const reconnectEvents = eventsOfType(events, "reconnect-scheduled");
+			expect(reconnectEvents).toHaveLength(5);
+
+			// attempt 2 onward: base*2^(attempt-1) >= 200 > 150, so the jittered
+			// value always saturates the cap.
+			for (const event of reconnectEvents) {
+				expect(event.delayMs).toBeLessThanOrEqual(maxDelay);
+			}
+			expect(reconnectEvents[reconnectEvents.length - 1].delayMs).toBe(
+				maxDelay,
+			);
 		});
 	});
 
@@ -573,6 +682,9 @@ describe("WebSocketManager debug events", () => {
 	});
 
 	describe("no-op when no listeners", () => {
+		// Smoke test: the emitDebug fast-path bails when there are no debug
+		// listeners and no onDebug callback. This drives a full lifecycle with
+		// zero observers to prove that path never throws AND still settles state.
 		it("does not break when no debug listeners are attached", () => {
 			const transport = new MockTransport();
 			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
@@ -598,8 +710,12 @@ describe("WebSocketManager debug events", () => {
 			manager.unsubscribe("conversation:ch1", unsubMsg("conversation", "ch1"));
 			manager.dispose();
 
-			// if we get here without throwing, the test passes
-			expect(manager.getSnapshot().disposed).toBe(true);
+			// Beyond not throwing, the lifecycle must have actually settled:
+			// dispose() routes through disconnect(), so state lands disconnected
+			// and the manager is flagged disposed.
+			const snapshot = manager.getSnapshot();
+			expect(snapshot.disposed).toBe(true);
+			expect(snapshot.connectionState).toBe("disconnected");
 		});
 
 		it("starts emitting when listener is added later", () => {

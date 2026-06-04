@@ -112,7 +112,7 @@ useSocketSubscription(manager, {
 				{ name: "useWebSocket(url, options)", type: "→ new WebSocketManager + hooks", description: "Construct the manager once at module scope; consume it via hooks where needed" },
 				{ name: "sendJsonMessage(msg)", type: "→ useSocketSend().send(msg)", description: "Typed against TClientMsg" },
 				{ name: "lastJsonMessage", type: "→ useSocketEvent(manager, type, handler)", description: "Push handlers per discriminator value, not pull from a state slot" },
-				{ name: "readyState", type: "→ useSocketConnectionState(manager)", description: 'Returns "disconnected" | "connecting" | "connected" | "reconnecting"' },
+				{ name: "readyState", type: "→ useSocketConnectionState(manager)", description: 'Returns "idle" | "disconnected" | "connecting" | "connected" | "reconnecting"' },
 				{ name: "shouldReconnect / reconnectAttempts / reconnectInterval", type: "→ reconnectMaxAttempts / reconnectBaseDelayMs / reconnectMaxDelayMs", description: "Exponential backoff with jitter is built in" },
 				{ name: "onOpen / onClose / onError", type: "→ onReady config callback or useSocketConnectionState hook", description: "Reacting to a successful (re)connect is what onReady is for; for state transitions use useSocketConnectionState in React or manager.addConnectionStateListener outside" },
 				{ name: "filter", type: "→ deserialize + useSocketEvent narrowing", description: "Decide what to keep at deserialize boundary; narrow with discriminator" },

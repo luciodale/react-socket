@@ -60,6 +60,14 @@ afterEach(() => {
 });
 
 describe("regression: online event during a pending reconnect", () => {
+	// Covers both the single-online and repeated-online regressions: the close
+	// schedules timer T1, then every online event funnels back through
+	// scheduleReconnect, which must clearTimeout the live timer before arming a
+	// new one. Firing online repeatedly (not just once) pins that the dedupe is
+	// unconditional/idempotent — dropping the clearTimeout guard stacks one
+	// extra connect per redundant call, so this single test catches it whether
+	// online fires once or many times. (Subsumes the deleted
+	// "repeated online events still produce a single connect".)
 	it("does not stack reconnect timers — exactly one connect fires", () => {
 		const { manager, transport } = createManager();
 		manager.connect();
@@ -70,25 +78,13 @@ describe("regression: online event during a pending reconnect", () => {
 		transport.simulateClose(1006);
 		expect(manager.getConnectionState()).toBe("reconnecting");
 
-		// Pre-fix: online scheduled a second timer while T1 stayed live.
-		window.dispatchEvent(new Event("online"));
-		vi.advanceTimersByTime(10_000);
-
-		expect(transport.connectCalls).toHaveLength(2);
-	});
-
-	it("repeated online events still produce a single connect", () => {
-		const { manager, transport } = createManager();
-		manager.connect();
-		transport.simulateOpen();
-		transport.simulateClose(1006);
-
+		// Pre-fix: each online scheduled another timer while T1 stayed live.
 		window.dispatchEvent(new Event("online"));
 		window.dispatchEvent(new Event("online"));
 		window.dispatchEvent(new Event("online"));
 		vi.advanceTimersByTime(10_000);
 
-		// 1 initial + 1 reconnect, regardless of how many online events fired.
+		// 1 initial + exactly 1 reconnect, no matter how many online events fired.
 		expect(transport.connectCalls).toHaveLength(2);
 	});
 });
@@ -150,7 +146,9 @@ describe("regression: reconnect completing while the tab is hidden", () => {
 
 describe("regression: offline during an in-flight dynamic url resolve", () => {
 	it("supersedes the resolve so no zombie socket connects", async () => {
-		let resolveUrl: ((url: string) => void) | null = null;
+		// `undefined` (not `null`) so TS control flow doesn't narrow the
+		// closure-assigned value to `never` at the call site below.
+		let resolveUrl: ((url: string) => void) | undefined;
 		const { manager, transport } = createManager({
 			url: () =>
 				new Promise<string>((resolve) => {
@@ -175,8 +173,25 @@ describe("regression: offline during an in-flight dynamic url resolve", () => {
 
 describe("regression: outstanding ping/pong cycles never stack", () => {
 	it("keeps a single pong deadline when pongTimeoutMs >= pingIntervalMs", () => {
+		// pongTimeoutMs (3000) spans 3 ping intervals (1000). The 'single
+		// outstanding ping' guard in firePing means the first cycle owns the
+		// only deadline: interval ticks at t=2000/3000 are no-ops while a pong
+		// is pending. Drop that guard and every interval tick sends a fresh
+		// ping AND overwrites this.pongTimer without clearing the previous
+		// setTimeout, leaking pong timers that each fire handlePongTimeout.
+		//
+		// The old assertion only advanced to t=4000, where exactly one pong
+		// timeout has fired in BOTH the guarded and unguarded builds (the
+		// leaked timers fire at t=5000/6000/7000), so it could not see the
+		// regression. We now pin two independent signals across the full
+		// window: the number of ping FRAMES on the wire, and the number of
+		// pong-timeout teardowns.
+		let pingFrames = 0;
 		const { manager, transport } = createManager({
-			ping: () => ({ type: "ping" }),
+			ping: () => {
+				pingFrames += 1;
+				return { type: "ping" };
+			},
 			isPong: (msg) => msg.type === "pong",
 			pingIntervalMs: 1_000,
 			pongTimeoutMs: 3_000,
@@ -185,10 +200,19 @@ describe("regression: outstanding ping/pong cycles never stack", () => {
 		transport.simulateOpen();
 		transport.disconnectCalls = [];
 
-		// No pongs ever arrive: the first cycle owns the only deadline
-		// (fires t=4000). Pre-fix every ping stacked a live pong timer.
+		// No pongs ever arrive. Guarded: 1 ping at t=1000, deadline fires once
+		// at t=4000, interval is then cleared by teardown. Unguarded: pings at
+		// t=1000/2000/3000/4000 stack 4 live pong timers.
 		vi.advanceTimersByTime(4_000);
+		// At t=4000 the guard's effect is already visible on the wire even
+		// though only one pong timeout has fired so far in either build.
+		expect(pingFrames).toBe(1);
 
+		// Advance well past every leaked deadline (t=5000/6000/7000). Guarded:
+		// still a single teardown; unguarded: one teardown per leaked timer.
+		vi.advanceTimersByTime(6_000);
+
+		expect(pingFrames).toBe(1);
 		const pongTimeouts = transport.disconnectCalls.filter(
 			(c) => c.reason === "pong timeout",
 		);
