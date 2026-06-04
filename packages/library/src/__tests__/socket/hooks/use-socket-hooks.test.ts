@@ -292,6 +292,35 @@ describe("useSocketSendFailed", () => {
 		]);
 	});
 
+	it("forwards reason transport-error when the wire write throws", () => {
+		class ThrowingTransport extends MockTransport {
+			send(): void {
+				throw new Error("wire write failed");
+			}
+		}
+		const transport = new ThrowingTransport();
+		const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+			url: "ws://test",
+			transport,
+			serialize: (msg) => JSON.stringify(msg),
+			deserialize: (raw) => JSON.parse(raw) as TServerMsg,
+		});
+		const reasons: string[] = [];
+		renderHook(() =>
+			useSocketSendFailed(manager, ({ reason }) => {
+				reasons.push(reason);
+			}),
+		);
+
+		act(() => {
+			manager.connect();
+			transport.simulateOpen();
+			manager.send({ data: { type: "chat", text: "boom" } });
+		});
+
+		expect(reasons).toEqual(["transport-error"]);
+	});
+
 	it("stops firing after unmount", () => {
 		const transport = new MockTransport();
 		const manager = new WebSocketManager<TClientMsg, TServerMsg>({

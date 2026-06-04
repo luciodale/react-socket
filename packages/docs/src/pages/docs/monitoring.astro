@@ -13,7 +13,7 @@ const debugEventsSample = `// Every internal lifecycle moment fires a typed debu
 // connection-state-change      from / to states
 // message-received             raw + deserialized + isPong
 // message-sent                 ackId + raw + deserialized
-// send-failed                  ackId + reason + deserialized
+// send-failed                  ackId + reason + deserialized + error?
 // subscribe / unsubscribe      key + refCount
 // in-flight-ack                ackId
 // in-flight-drop               ids

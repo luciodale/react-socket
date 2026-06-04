@@ -372,7 +372,15 @@ export class WebSocketManager<
 			this.emitSendFailed(params, "not-connected");
 			return false;
 		}
-		const serialized = this.serialize(params.data);
+		let serialized: TWire;
+		try {
+			serialized = this.serialize(params.data);
+		} catch (error) {
+			// Symmetric to the guarded deserialize path: a throwing serialize
+			// must not leave sendIntent consumers with a stuck pending message.
+			this.emitSendFailed(params, "serialize-error", error);
+			return false;
+		}
 		const sent = this.rawSend(serialized);
 		if (sent && params.ackId) {
 			// Reuse while unacked overwrites the in-flight entry — surface it.
@@ -745,6 +753,7 @@ export class WebSocketManager<
 	private emitSendFailed(
 		params: TSendParams<TClientMsg>,
 		reason: TSendFailedReason,
+		error?: unknown,
 	): void {
 		this.sendFailedListeners.emit({ ...params, reason });
 		this.emitDebug({
@@ -752,6 +761,7 @@ export class WebSocketManager<
 			ackId: params.ackId,
 			reason,
 			deserialized: params.data,
+			error,
 		});
 	}
 

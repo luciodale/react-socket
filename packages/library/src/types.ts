@@ -101,9 +101,12 @@ export type TSendParams<TClientMsg> = {
 
 /**
  * Why a `send(...)` returned false: the socket was not connected at send
- * time, or the transport threw on the wire write.
+ * time, `serialize` threw, or the transport threw on the wire write.
  */
-export type TSendFailedReason = "not-connected" | "transport-error";
+export type TSendFailedReason =
+	| "not-connected"
+	| "serialize-error"
+	| "transport-error";
 
 export type TSendFailedParams<TClientMsg> = TSendParams<TClientMsg> & {
 	reason: TSendFailedReason;
@@ -153,6 +156,7 @@ export type TDebugEventPayload<TClientMsg, TServerMsg> =
 			ackId: string | undefined;
 			reason: TSendFailedReason;
 			deserialized: TClientMsg;
+			error?: unknown;
 	  }
 	| {
 			type: "subscribe";

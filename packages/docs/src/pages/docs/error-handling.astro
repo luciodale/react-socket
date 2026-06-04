@@ -17,7 +17,7 @@ export const prerender = true;
 			react-socket surfaces these as three concrete things you can react to:
 		</p>
 		<ul class="list-disc list-inside space-y-2 text-white/60">
-			<li><InlineCode>send()</InlineCode> returns <InlineCode>false</InlineCode> when the socket is not connected</li>
+			<li><InlineCode>send()</InlineCode> returns <InlineCode>false</InlineCode> when the message never left the client — socket down, serialize threw, or the wire write threw. <InlineCode>useSocketSendFailed</InlineCode> observes the same failures centrally</li>
 			<li><InlineCode>onDebug</InlineCode> emits typed events for deserialize failures, URL resolve failures, in-flight drops, and more</li>
 			<li>Standard React error boundaries still apply to any component that reads socket state</li>
 		</ul>
@@ -48,7 +48,7 @@ function handleSend(text: string) {
 		</p>
 		<CodeBlock
 			code={`useSocketSendFailed(manager, ({ data, ackId, reason }) => {
-  // reason: "not-connected" | "transport-error"
+  // reason: "not-connected" | "serialize-error" | "transport-error"
   if (ackId) useChatStore.getState().markFailed(ackId);
 });`}
 			language="tsx"

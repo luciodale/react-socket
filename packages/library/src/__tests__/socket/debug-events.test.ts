@@ -306,6 +306,31 @@ describe("WebSocketManager debug events", () => {
 			const failedEvents = eventsOfType(events, "send-failed");
 			expect(failedEvents).toHaveLength(0);
 		});
+
+		it("emits with reason serialize-error and the thrown error when serialize throws", () => {
+			const transport = new MockTransport();
+			const events: TDebugEvent<TTestClientMsg, TTestServerMsg>[] = [];
+			const thrown = new Error("circular structure");
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				url: "ws://test",
+				transport,
+				serialize: () => {
+					throw thrown;
+				},
+				deserialize: testSerialization.deserialize,
+				onDebug: (e) => events.push(e),
+			});
+			manager.connect();
+			transport.simulateOpen();
+
+			const result = manager.send({ data: { text: "hi" } });
+
+			expect(result).toBe(false);
+			const failedEvents = eventsOfType(events, "send-failed");
+			expect(failedEvents).toHaveLength(1);
+			expect(failedEvents[0].reason).toBe("serialize-error");
+			expect(failedEvents[0].error).toBe(thrown);
+		});
 	});
 
 	describe("subscribe/unsubscribe events", () => {

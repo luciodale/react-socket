@@ -298,15 +298,19 @@ type TSendFailedSource<TClientMsg> = {
 /**
  * Fires when `manager.send(...)` returns false — the message never left
  * the client. `reason` is `"not-connected"` when the socket was down at
- * send time, or `"transport-error"` when the transport threw on the wire
- * write. The outcome counterpart to `useSocketSendIntent`: intent
- * announces the attempt, this announces the failure. Use it to mark
- * optimistic UI as failed or enqueue the message for resend via
- * `createUndeliveredSync` — centrally, without checking the boolean at
- * every call site.
+ * send time, `"serialize-error"` when `serialize` threw, or
+ * `"transport-error"` when the transport threw on the wire write. The
+ * outcome counterpart to `useSocketSendIntent`: intent announces the
+ * attempt, this announces the failure. Use it to mark optimistic UI as
+ * failed or enqueue the message for resend via `createUndeliveredSync` —
+ * centrally, without checking the boolean at every call site.
  *
  * Messages that DID reach the wire but are dropped unacked by a
  * disconnect surface through `useSocketInFlightDrop`, not here.
+ *
+ * Note: sends on a disposed manager fail with `"not-connected"`. That
+ * state is terminal — do not auto-retry from this handler without also
+ * observing connection state.
  *
  * @example
  * ```tsx

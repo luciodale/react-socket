@@ -733,6 +733,66 @@ describe("WebSocketManager", () => {
 			});
 		});
 
+		it("fires with reason serialize-error when serialize throws, without sending", () => {
+			const failures: {
+				data: TTestClientMsg;
+				ackId?: string;
+				reason: string;
+			}[] = [];
+			const transport = new MockTransport();
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				url: "ws://test",
+				transport,
+				serialize: () => {
+					throw new Error("circular structure");
+				},
+				deserialize: testSerialization.deserialize,
+			});
+			manager.addSendFailedListener(({ data, ackId, reason }) => {
+				failures.push({ data, ackId, reason });
+			});
+			manager.connect();
+			transport.simulateOpen();
+			transport.sentMessages = [];
+
+			const result = manager.send({
+				data: { action: "message" },
+				ackId: "msg-1",
+			});
+
+			expect(result).toBe(false);
+			expect(transport.sentMessages).toHaveLength(0);
+			expect(failures).toHaveLength(1);
+			expect(failures[0]).toEqual({
+				data: { action: "message" },
+				ackId: "msg-1",
+				reason: "serialize-error",
+			});
+		});
+
+		it("does not track transport-error sends with an ackId as in-flight", () => {
+			class ThrowingTransport extends MockTransport {
+				send(): void {
+					throw new Error("wire write failed");
+				}
+			}
+			const transport = new ThrowingTransport();
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+			});
+			const dropped: { id: string; data: TTestClientMsg }[][] = [];
+			manager.addInFlightDropListener((messages) => dropped.push(messages));
+			manager.connect();
+			transport.simulateOpen();
+
+			manager.send({ data: { action: "message" }, ackId: "msg-1" });
+			transport.simulateClose();
+
+			expect(dropped).toHaveLength(0);
+		});
+
 		it("does not fire when the send succeeds", () => {
 			const failures: unknown[] = [];
 			const { manager, transport } = createManager();

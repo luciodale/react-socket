@@ -236,7 +236,8 @@ function onSubmit(text: string) {
 			Fires when <InlineCode>send()</InlineCode> returns
 			<InlineCode>false</InlineCode> — the message never left the client.
 			<InlineCode>reason</InlineCode> is
-			<InlineCode>"not-connected"</InlineCode> (socket down at send time) or
+			<InlineCode>"not-connected"</InlineCode> (socket down at send time),
+			<InlineCode>"serialize-error"</InlineCode> (serialize threw) or
 			<InlineCode>"transport-error"</InlineCode> (the wire write threw). The
 			outcome counterpart to <InlineCode>useSocketSendIntent</InlineCode>:
 			mark optimistic UI as failed or enqueue for resend centrally, without
@@ -461,6 +462,7 @@ await undelivered.init();`}
 | connection-state-change       | { from, to }                            |
 | message-received              | { raw, deserialized, isPong }           |
 | message-sent                  | { ackId?, raw, deserialized }           |
+| send-failed                   | { ackId?, reason, deserialized, error? }|
 | subscribe                     | { key, refCount, raw?, deserialized? }  |
 | unsubscribe                   | { key, refCount, raw?, deserialized? }  |
 | in-flight-ack                 | { ackId }                               |
