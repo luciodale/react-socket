@@ -4,7 +4,7 @@ import {
 	useSocketSend,
 	WebSocketManager,
 } from "@luciodale/react-socket";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { getWsUrl } from "../../lib/ws-url";
 
 // ── Protocol ────────────────────────────────────────────────────────
@@ -25,27 +25,26 @@ type TEntry =
 	| { id: string; kind: "assistant"; text: string }
 	| { id: string; kind: "not-sent"; text: string };
 
+// ── Manager ─────────────────────────────────────────────────────────
+
+const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+	url: getWsUrl(),
+	serialize: (msg) => JSON.stringify(msg),
+	deserialize: (raw) => JSON.parse(raw),
+});
+
 // ── Component ───────────────────────────────────────────────────────
 
 export function QuickPrompt() {
 	const [input, setInput] = useState("");
 	const [messages, setMessages] = useState<TEntry[]>([]);
 
-	const manager = useMemo(
-		() =>
-			new WebSocketManager<TClientMsg, TServerMsg>({
-				url: getWsUrl(),
-				serialize: (msg) => JSON.stringify(msg),
-				deserialize: (raw) => JSON.parse(raw) as TServerMsg,
-			}),
-		[],
-	);
-
 	useEffect(() => {
 		manager.connect();
 		return () => manager.disconnect();
-	}, [manager]);
+	}, []);
 
+	// `msg` is narrowed to the "chat" variant — msg.text is typed, no cast.
 	useSocketEvent(manager, "chat", (msg) => {
 		setMessages((prev) => [
 			...prev,

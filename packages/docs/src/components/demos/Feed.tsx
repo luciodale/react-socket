@@ -4,7 +4,7 @@ import {
 	useSocketSend,
 	WebSocketManager,
 } from "@luciodale/react-socket";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getWsUrl } from "../../lib/ws-url";
 
 // ── Protocol ────────────────────────────────────────────────────────
@@ -23,21 +23,19 @@ type TFeedEvent = {
 
 type TServerMsg = TFeedEvent;
 
+// ── Manager ─────────────────────────────────────────────────────────
+
+const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+	url: getWsUrl(),
+	serialize: (msg) => JSON.stringify(msg),
+	deserialize: (raw) => JSON.parse(raw),
+});
+
 // ── Component ───────────────────────────────────────────────────────
 
 const MAX_VISIBLE = 60;
 
 export function Feed() {
-	const manager = useMemo(
-		() =>
-			new WebSocketManager<TClientMsg, TServerMsg>({
-				url: getWsUrl(),
-				serialize: (msg) => JSON.stringify(msg),
-				deserialize: (raw) => JSON.parse(raw) as TServerMsg,
-			}),
-		[],
-	);
-
 	const [items, setItems] = useState<TFeedEvent[]>([]);
 	const [running, setRunning] = useState(false);
 	const renderCountRef = useRef(0);
@@ -48,12 +46,13 @@ export function Feed() {
 	useEffect(() => {
 		manager.connect();
 		return () => manager.disconnect();
-	}, [manager]);
+	}, []);
 
 	// Bursts of 4–12 events arrive back to back, then a 1.5–3s pause.
 	// flushMs caps the steady-state work; idleMs trims the trailing
 	// latency so the last events of a burst land within ~80ms of the
 	// final wire frame instead of waiting for the next tick.
+	// `msgs` is inferred as TFeedEvent[] from the "feed" literal — no cast.
 	useSocketEventBatch(
 		manager,
 		"feed",

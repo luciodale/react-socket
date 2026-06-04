@@ -8,8 +8,8 @@ import DocsPage from "../../layouts/DocsPage.astro";
 export const prerender = true;
 ---
 
-<DocsPage title="Space message persistence" description="Send messages into a Space, lose the connection mid-flight, retry on reconnect. localStorage holds the failed messages so nothing gets lost.">
-	<ContentSection label="Space message persistence">
+<DocsPage title="Space persistence" description="Send messages into a Space, lose the connection mid-flight, retry on reconnect. localStorage holds the failed messages so nothing gets lost.">
+	<ContentSection label="Space persistence">
 		<p class="text-white/60 mb-6 leading-relaxed">
 			Real Spaces stay open all day. Connections drop on commute, on
 			train Wi-Fi, when laptops sleep. The user expects every message
@@ -66,7 +66,7 @@ await undelivered.init();`}
 			code={`const manager = new WebSocketManager<TClientMsg, TServerMsg>({
   url: getWsUrl(),
   serialize: (msg) => JSON.stringify(msg),
-  deserialize: (raw) => JSON.parse(raw) as TServerMsg,
+  deserialize: (raw) => JSON.parse(raw),
 
   ping: () => ({ type: "ping" }),
   isPong: (msg) => msg.type === "pong",

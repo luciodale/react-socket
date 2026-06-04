@@ -3,7 +3,7 @@ import {
 	useSocketEvent,
 	WebSocketManager,
 } from "@luciodale/react-socket";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getWsUrl } from "../../lib/ws-url";
 
 // ── Protocol ────────────────────────────────────────────────────────
@@ -22,8 +22,10 @@ type TServerMsg =
 //
 // Stands in for your real auth store. `mintToken` returns a fresh
 // access token each time, `mintBadToken` gives one the server rejects.
+// `tokenStore` holds the current token so `onReady` can read it.
 
 let tokenCounter = 1;
+const tokenStore = { current: "" };
 function mintToken(): string {
 	return `access-${tokenCounter++}`;
 }
@@ -31,12 +33,27 @@ function mintBadToken(): string {
 	return `bad-${tokenCounter++}`;
 }
 
+// ── Manager ─────────────────────────────────────────────────────────
+
+const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+	url: getWsUrl(),
+	serialize: (msg) => JSON.stringify(msg),
+	deserialize: (raw) => JSON.parse(raw),
+
+	// Fires after every (re)connect + subscription replay.
+	// Right seam for a first-message auth frame.
+	onReady() {
+		const token = tokenStore.current;
+		if (!token) return;
+		manager.send({ data: { type: "auth", token } });
+	},
+});
+
 // ── Component ───────────────────────────────────────────────────────
 
 type TLogEntry = { id: string; text: string };
 
 export function FirstMessageAuth() {
-	const tokenRef = useRef<string>("");
 	const logIdRef = useRef<number>(0);
 	const [currentToken, setCurrentToken] = useState<string>("");
 	const [authed, setAuthed] = useState<boolean>(false);
@@ -49,42 +66,25 @@ export function FirstMessageAuth() {
 		setLog((prev) => [{ id, text }, ...prev].slice(0, 10));
 	}
 
-	const manager = useMemo(() => {
-		let mgr: WebSocketManager<TClientMsg, TServerMsg>;
-		mgr = new WebSocketManager<TClientMsg, TServerMsg>({
-			url: getWsUrl(),
-			serialize: (msg) => JSON.stringify(msg),
-			deserialize: (raw) => JSON.parse(raw) as TServerMsg,
-
-			// Fires after every (re)connect + subscription replay.
-			// Right seam for a first-message auth frame.
-			onReady() {
-				const token = tokenRef.current;
-				if (!token) return;
-				mgr.send({ data: { type: "auth", token } });
-			},
-		});
-		return mgr;
-	}, []);
-
 	useEffect(() => {
-		tokenRef.current = mintToken();
-		setCurrentToken(tokenRef.current);
+		tokenStore.current = mintToken();
+		setCurrentToken(tokenStore.current);
 		manager.connect();
 		return () => manager.disconnect();
-	}, [manager]);
+	}, []);
 
 	useSocketEvent(manager, "auth-required", () => {
 		appendLog("server: auth-required");
 		// onReady normally handles this on initial connect.
 		// Re-sending here covers servers that challenge mid-session.
-		const token = tokenRef.current;
+		const token = tokenStore.current;
 		if (token) {
 			appendLog(`client: auth ${token}`);
 			manager.send({ data: { type: "auth", token } });
 		}
 	});
 
+	// `msg` is narrowed to the "auth-ok" variant — msg.userId is typed, no cast.
 	useSocketEvent(manager, "auth-ok", (msg) => {
 		appendLog(`server: auth-ok user=${msg.userId}`);
 		setAuthed(true);
@@ -95,7 +95,7 @@ export function FirstMessageAuth() {
 		appendLog("server: auth-expired");
 		setAuthed(false);
 		const next = mintToken();
-		tokenRef.current = next;
+		tokenStore.current = next;
 		setCurrentToken(next);
 		appendLog(`client: auth ${next}`);
 		manager.send({ data: { type: "auth", token: next } });
@@ -116,7 +116,7 @@ export function FirstMessageAuth() {
 
 	function handleBadToken() {
 		const next = mintBadToken();
-		tokenRef.current = next;
+		tokenStore.current = next;
 		setCurrentToken(next);
 		appendLog(`client: auth ${next}`);
 		manager.send({ data: { type: "auth", token: next } });
@@ -124,7 +124,7 @@ export function FirstMessageAuth() {
 
 	function handleFreshToken() {
 		const next = mintToken();
-		tokenRef.current = next;
+		tokenStore.current = next;
 		setCurrentToken(next);
 		appendLog(`client: auth ${next}`);
 		manager.send({ data: { type: "auth", token: next } });

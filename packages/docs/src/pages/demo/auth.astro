@@ -21,34 +21,31 @@ type TServerMsg =
   | { type: "auth-expired" }
   | { type: "unauthorized"; reason: string };`;
 
-const managerSample = `const manager = useMemo(() => {
-  let mgr: WebSocketManager<TClientMsg, TServerMsg>;
-  mgr = new WebSocketManager<TClientMsg, TServerMsg>({
-    // No token in the URL. The socket opens unauthenticated.
-    url: getWsUrl(),
-    serialize: (msg) => JSON.stringify(msg),
-    deserialize: (raw) => JSON.parse(raw),
+const managerSample = `const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  // No token in the URL. The socket opens unauthenticated.
+  url: getWsUrl(),
+  serialize: (msg) => JSON.stringify(msg),
+  deserialize: (raw) => JSON.parse(raw),
 
-    // Fires after every (re)connect + subscription replay.
-    // Right seam for the first-message auth frame.
-    onReady() {
-      const token = tokenRef.current;
-      if (!token) return;
-      mgr.send({ data: { type: "auth", token } });
-    },
-  });
-  return mgr;
-}, []);`;
+  // Fires after every (re)connect + subscription replay.
+  // Right seam for the first-message auth frame.
+  onReady() {
+    const token = tokenStore.current;
+    if (!token) return;
+    manager.send({ data: { type: "auth", token } });
+  },
+});`;
 
 const reauthSample = `useSocketEvent(manager, "auth-expired", () => {
   setAuthed(false);
   // Refresh the token and send a new auth frame.
   // No reconnect: the socket stays open.
   const next = mintToken();
-  tokenRef.current = next;
+  tokenStore.current = next;
   manager.send({ data: { type: "auth", token: next } });
 });
 
+// msg is narrowed to { type: "auth-ok"; userId: string } — no cast
 useSocketEvent(manager, "auth-ok", (msg) => {
   setAuthed(true);
   setUserId(msg.userId);
@@ -108,11 +105,13 @@ useSocketEvent(manager, "unauthorized", () => {
 			need a separate effect to re-auth.
 		</p>
 		<CodeBlock code={managerSample} language="tsx" filename="FirstMessageAuth.tsx" />
-		<Callout type="tip" title="Late binding the manager ref">
-			The <InlineCode>let mgr; mgr = new ...</InlineCode> pattern is so
-			<InlineCode>onReady</InlineCode> can call
-			<InlineCode>mgr.send()</InlineCode>. By the time the callback fires,
-			<InlineCode>mgr</InlineCode> is assigned.
+		<Callout type="tip" title="onReady can reference the manager">
+			<InlineCode>onReady</InlineCode> only fires after
+			<InlineCode>connect()</InlineCode>, so referencing the module level
+			<InlineCode>manager</InlineCode> constant inside its own config is
+			safe — the closure runs long after the constant is initialized.
+			<InlineCode>tokenStore</InlineCode> is a plain module level holder
+			the UI writes the current token into.
 		</Callout>
 	</ContentSection>
 

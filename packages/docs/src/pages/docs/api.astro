@@ -79,7 +79,7 @@ type TServerMsg = { type: "echo"; text: string };
 const manager = new WebSocketManager<TClientMsg, TServerMsg>({
   url: "wss://...",
   serialize: (msg) => JSON.stringify(msg),
-  deserialize: (raw) => JSON.parse(raw) as TServerMsg,
+  deserialize: (raw) => JSON.parse(raw),
 });`}
 			language="tsx"
 			filename="manager.ts"
@@ -375,7 +375,7 @@ const s = manager.getSnapshot();
   url: "wss://...",
   discriminator: "kind",
   serialize: (msg) => JSON.stringify(msg),
-  deserialize: (raw) => JSON.parse(raw) as TServerMsg,
+  deserialize: (raw) => JSON.parse(raw),
 });
 
 useSocketEvent(manager, "notification", (msg) => {

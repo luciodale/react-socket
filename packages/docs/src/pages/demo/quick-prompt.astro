@@ -19,10 +19,14 @@ export const prerender = true;
 		</p>
 		<p class="text-white/60 leading-relaxed">
 			This is the smallest sketch that still tells the truth: the manager
-			is created in <InlineCode>useMemo</InlineCode>, lifecycle is one
+			is a module level constant, lifecycle is one
 			<InlineCode>useEffect</InlineCode>, and the entire wire surface is
 			one <InlineCode>useSocketEvent</InlineCode> +
-			<InlineCode>useSocketSend</InlineCode>.
+			<InlineCode>useSocketSend</InlineCode>. Both ends are checked
+			against your protocol types — a wrong <InlineCode>type</InlineCode>
+			literal or a missing field will not compile, and the handler's
+			<InlineCode>msg</InlineCode> is narrowed to the matching variant
+			with no cast.
 		</p>
 	</ContentSection>
 
@@ -32,7 +36,7 @@ export const prerender = true;
 
 	<ContentSection label="Source">
 		<CodeBlock
-			code={`import { useEffect, useMemo, useState } from "react";
+			code={`import { useEffect, useState } from "react";
 import {
   useSocketEvent,
   useSocketSend,
@@ -42,25 +46,22 @@ import {
 type TClientMsg = { type: "quick-ask"; id: string; prompt: string };
 type TServerMsg = { type: "chat"; id: string; sender: string; text: string };
 
+const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  url: "ws://localhost:3001/ws",
+  serialize: (msg) => JSON.stringify(msg),
+  deserialize: (raw) => JSON.parse(raw),
+});
+
 function QuickPrompt() {
   const [input, setInput] = useState("");
   const [replies, setReplies] = useState<{ id: string; text: string }[]>([]);
 
-  const manager = useMemo(
-    () =>
-      new WebSocketManager<TClientMsg, TServerMsg>({
-        url: "ws://localhost:3001/ws",
-        serialize: (msg) => JSON.stringify(msg),
-        deserialize: (raw) => JSON.parse(raw),
-      }),
-    [],
-  );
-
   useEffect(() => {
     manager.connect();
     return () => manager.disconnect();
-  }, [manager]);
+  }, []);
 
+  // msg is narrowed to the "chat" variant — msg.text is typed, no cast
   useSocketEvent(manager, "chat", (msg) => {
     setReplies((prev) => [...prev, { id: msg.id, text: msg.text }]);
   });

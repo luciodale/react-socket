@@ -88,7 +88,7 @@ const manager = new WebSocketManager<TClientMsg, TServerMsg, "kind">({
   url: "wss://...",
   discriminator: "kind",
   serialize: (msg) => JSON.stringify(msg),
-  deserialize: (raw) => JSON.parse(raw) as TServerMsg,
+  deserialize: (raw) => JSON.parse(raw),
 });
 
 useSocketEvent(manager, "notification", (msg) => {

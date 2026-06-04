@@ -5,13 +5,21 @@ import {
 	WebSocketManager,
 } from "@luciodale/react-socket";
 import { InspectorPanel } from "@luciodale/react-socket/inspector";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { getWsUrl } from "../../lib/ws-url";
 
 // ── Protocol ────────────────────────────────────────────────────────
 
 type TClientMsg = { type: "echo"; text: string };
 type TServerMsg = { type: "echo"; text: string };
+
+// ── Manager ─────────────────────────────────────────────────────────
+
+const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+	url: getWsUrl(),
+	serialize: (msg) => JSON.stringify(msg),
+	deserialize: (raw) => JSON.parse(raw),
+});
 
 // ── Component ───────────────────────────────────────────────────────
 
@@ -21,21 +29,12 @@ export function InspectorDemo() {
 		Array<{ id: string; from: string; text: string }>
 	>([]);
 
-	const manager = useMemo(
-		() =>
-			new WebSocketManager<TClientMsg, TServerMsg>({
-				url: getWsUrl(),
-				serialize: (msg) => JSON.stringify(msg),
-				deserialize: (raw) => JSON.parse(raw) as TServerMsg,
-			}),
-		[],
-	);
-
 	useEffect(() => {
 		manager.connect();
 		return () => manager.disconnect();
-	}, [manager]);
+	}, []);
 
+	// `msg` is narrowed to the "echo" variant — msg.text is typed, no cast.
 	useSocketEvent(manager, "echo", (msg) => {
 		setMessages((prev) => [
 			...prev,

@@ -75,7 +75,7 @@ const manager = new WebSocketManager<
     msg.type === "blob" ? encode(msg) : JSON.stringify(msg),
   deserialize: (raw) =>
     typeof raw === "string"
-      ? (JSON.parse(raw) as TServerMsg)
+      ? JSON.parse(raw)
       : decode(raw),
 });`;
 

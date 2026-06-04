@@ -56,7 +56,7 @@ type TMessage = {
 const manager = new WebSocketManager<TClientMsg, TServerMsg>({
 	url: getWsUrl(),
 	serialize: (msg) => JSON.stringify(msg),
-	deserialize: (raw) => JSON.parse(raw) as TServerMsg,
+	deserialize: (raw) => JSON.parse(raw),
 
 	ping: () => ({ type: "ping" }),
 	isPong: (msg) => msg.type === "pong",
@@ -113,6 +113,8 @@ function setTyping(
 // ── Bridges ─────────────────────────────────────────────────────────
 
 function SpaceBridge() {
+	// `msg` is narrowed per discriminator value — each handler sees only
+	// its own variant's fields, no cast.
 	useSocketEvent(manager, "chat", (msg) => {
 		appendMessage(msg.channel, {
 			id: msg.id,

@@ -63,7 +63,7 @@ const useStore = create<{ messages: TUIMessage[] }>()(() => ({
 const manager = new WebSocketManager<TClientMsg, TServerMsg>({
 	url: getWsUrl(),
 	serialize: (msg) => JSON.stringify(msg),
-	deserialize: (raw) => JSON.parse(raw) as TServerMsg,
+	deserialize: (raw) => JSON.parse(raw),
 
 	ping: () => ({ type: "ping" }),
 	isPong: (msg) => msg.type === "pong",
@@ -117,6 +117,7 @@ function OptimisticBridge() {
 }
 
 function DeliveredBridge() {
+	// `msg` is narrowed to the "delivered" variant — msg.ackId is typed, no cast.
 	useSocketEvent(manager, "delivered", (msg) => {
 		undelivered.removeMessage(CHANNEL, msg.ackId);
 		useStore.setState((s) => ({

@@ -5,7 +5,7 @@ import {
 	useSocketSend,
 	WebSocketManager,
 } from "@luciodale/react-socket";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getWsUrl } from "../../lib/ws-url";
 
 // ── Protocol ────────────────────────────────────────────────────────
@@ -22,19 +22,17 @@ type TServerMsg = {
 	last: number;
 };
 
+// ── Manager ─────────────────────────────────────────────────────────
+
+const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+	url: getWsUrl(),
+	serialize: (msg) => JSON.stringify(msg),
+	deserialize: (raw) => JSON.parse(raw),
+});
+
 // ── Component ───────────────────────────────────────────────────────
 
 export function Trading() {
-	const manager = useMemo(
-		() =>
-			new WebSocketManager<TClientMsg, TServerMsg>({
-				url: getWsUrl(),
-				serialize: (msg) => JSON.stringify(msg),
-				deserialize: (raw) => JSON.parse(raw) as TServerMsg,
-			}),
-		[],
-	);
-
 	const [running, setRunning] = useState(false);
 	const state = useSocketConnectionState(manager);
 	const { send } = useSocketSend(manager);
@@ -42,7 +40,7 @@ export function Trading() {
 	useEffect(() => {
 		manager.connect();
 		return () => manager.disconnect();
-	}, [manager]);
+	}, []);
 
 	function start() {
 		send({ type: "subscribe-ticks" });
@@ -111,6 +109,7 @@ function PerEventQuote({
 	const renderCountRef = useRef(0);
 	renderCountRef.current += 1;
 
+	// `msg` is narrowed to the "tick" variant — bid/ask/last are typed, no cast.
 	useSocketEvent(manager, "tick", (msg) => {
 		setLatest(msg);
 		setReceived((n) => n + 1);

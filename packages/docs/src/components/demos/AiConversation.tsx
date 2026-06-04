@@ -100,7 +100,7 @@ const useStore = create<TStore>()((set) => ({
 const manager = new WebSocketManager<TClientMsg, TServerMsg>({
 	url: getWsUrl(),
 	serialize: (msg) => JSON.stringify(msg),
-	deserialize: (raw) => JSON.parse(raw) as TServerMsg,
+	deserialize: (raw) => JSON.parse(raw),
 });
 
 // ── Bridge ──────────────────────────────────────────────────────────
@@ -110,6 +110,7 @@ const manager = new WebSocketManager<TClientMsg, TServerMsg>({
 // tokens land without waiting for the next interval tick.
 
 function StreamBridge() {
+	// `msg` is narrowed to the "stream-start" variant — msg.id is typed, no cast.
 	useSocketEvent(manager, "stream-start", (msg) => {
 		useStore.getState().startStream(msg.id);
 	});
