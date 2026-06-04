@@ -14,6 +14,8 @@ import type {
 	TIncomingData,
 	TManagerConfig,
 	TManagerSnapshot,
+	TSendFailedParams,
+	TSendFailedReason,
 	TSendParams,
 	TWireData,
 } from "./types";
@@ -91,6 +93,9 @@ export class WebSocketManager<
 	private readonly pendingSubscriptionListeners = new ListenerSet<[]>();
 	private readonly sendIntentListeners = new ListenerSet<
 		[TSendParams<TClientMsg>]
+	>();
+	private readonly sendFailedListeners = new ListenerSet<
+		[TSendFailedParams<TClientMsg>]
 	>();
 	private readonly inFlightDropListeners = new ListenerSet<
 		[{ id: string; data: TClientMsg }[]]
@@ -363,7 +368,10 @@ export class WebSocketManager<
 
 	send(params: TSendParams<TClientMsg>): boolean {
 		this.sendIntentListeners.emit(params);
-		if (this.connectionState !== "connected") return false;
+		if (this.connectionState !== "connected") {
+			this.emitSendFailed(params, "not-connected");
+			return false;
+		}
 		const serialized = this.serialize(params.data);
 		const sent = this.rawSend(serialized);
 		if (sent && params.ackId) {
@@ -380,6 +388,8 @@ export class WebSocketManager<
 				raw: serialized,
 				deserialized: params.data,
 			});
+		} else {
+			this.emitSendFailed(params, "transport-error");
 		}
 		return sent;
 	}
@@ -430,6 +440,12 @@ export class WebSocketManager<
 		cb: (params: TSendParams<TClientMsg>) => void,
 	): () => void {
 		return this.sendIntentListeners.add(cb);
+	}
+
+	addSendFailedListener(
+		cb: (params: TSendFailedParams<TClientMsg>) => void,
+	): () => void {
+		return this.sendFailedListeners.add(cb);
 	}
 
 	addInFlightDropListener(
@@ -724,6 +740,19 @@ export class WebSocketManager<
 		} catch {
 			return false;
 		}
+	}
+
+	private emitSendFailed(
+		params: TSendParams<TClientMsg>,
+		reason: TSendFailedReason,
+	): void {
+		this.sendFailedListeners.emit({ ...params, reason });
+		this.emitDebug({
+			type: "send-failed",
+			ackId: params.ackId,
+			reason,
+			deserialized: params.data,
+		});
 	}
 
 	private sendSubscribe(key: string): void {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
-import type { TConnectionState, TSendParams } from "./types";
+import type { TConnectionState, TSendFailedParams, TSendParams } from "./types";
 
 // ── useSocketConnectionState ─────────────────────────────────────────
 
@@ -282,6 +282,48 @@ export function useSocketSendIntent<TClientMsg>(
 	handlerRef.current = handler;
 	useEffect(() => {
 		return manager.addSendIntentListener((params) =>
+			handlerRef.current(params),
+		);
+	}, [manager]);
+}
+
+// ── useSocketSendFailed ──────────────────────────────────────────────
+
+type TSendFailedSource<TClientMsg> = {
+	addSendFailedListener: (
+		cb: (params: TSendFailedParams<TClientMsg>) => void,
+	) => () => void;
+};
+
+/**
+ * Fires when `manager.send(...)` returns false — the message never left
+ * the client. `reason` is `"not-connected"` when the socket was down at
+ * send time, or `"transport-error"` when the transport threw on the wire
+ * write. The outcome counterpart to `useSocketSendIntent`: intent
+ * announces the attempt, this announces the failure. Use it to mark
+ * optimistic UI as failed or enqueue the message for resend via
+ * `createUndeliveredSync` — centrally, without checking the boolean at
+ * every call site.
+ *
+ * Messages that DID reach the wire but are dropped unacked by a
+ * disconnect surface through `useSocketInFlightDrop`, not here.
+ *
+ * @example
+ * ```tsx
+ * useSocketSendFailed(manager, ({ data, ackId }) => {
+ *   if (ackId) markMessageFailed(ackId);
+ *   undeliveredSync.addMessage(channel, data);
+ * });
+ * ```
+ */
+export function useSocketSendFailed<TClientMsg>(
+	manager: TSendFailedSource<TClientMsg>,
+	handler: (params: TSendFailedParams<TClientMsg>) => void,
+): void {
+	const handlerRef = useRef(handler);
+	handlerRef.current = handler;
+	useEffect(() => {
+		return manager.addSendFailedListener((params) =>
 			handlerRef.current(params),
 		);
 	}, [manager]);

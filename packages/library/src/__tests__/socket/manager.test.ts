@@ -657,6 +657,130 @@ describe("WebSocketManager", () => {
 		});
 	});
 
+	describe("send failed listener", () => {
+		it("fires with reason not-connected when sending while down", () => {
+			const failures: {
+				data: TTestClientMsg;
+				ackId?: string;
+				reason: string;
+			}[] = [];
+			const transport = new MockTransport();
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+			});
+			manager.addSendFailedListener(({ data, ackId, reason }) => {
+				failures.push({ data, ackId, reason });
+			});
+
+			const result = manager.send({
+				data: { action: "message" },
+				ackId: "msg-1",
+			});
+
+			expect(result).toBe(false);
+			expect(failures).toHaveLength(1);
+			expect(failures[0]).toEqual({
+				data: { action: "message" },
+				ackId: "msg-1",
+				reason: "not-connected",
+			});
+		});
+
+		it("fires after the send intent listener for the same send", () => {
+			const order: string[] = [];
+			const transport = new MockTransport();
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+			});
+			manager.addSendIntentListener(() => order.push("intent"));
+			manager.addSendFailedListener(() => order.push("failed"));
+
+			manager.send({ data: { action: "message" } });
+
+			expect(order).toEqual(["intent", "failed"]);
+		});
+
+		it("fires with reason transport-error when the wire write throws", () => {
+			class ThrowingTransport extends MockTransport {
+				send(): void {
+					throw new Error("wire write failed");
+				}
+			}
+			const failures: { data: TTestClientMsg; reason: string }[] = [];
+			const transport = new ThrowingTransport();
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+			});
+			manager.addSendFailedListener(({ data, reason }) => {
+				failures.push({ data, reason });
+			});
+			manager.connect();
+			transport.simulateOpen();
+
+			const result = manager.send({ data: { action: "message" } });
+
+			expect(result).toBe(false);
+			expect(failures).toHaveLength(1);
+			expect(failures[0]).toEqual({
+				data: { action: "message" },
+				reason: "transport-error",
+			});
+		});
+
+		it("does not fire when the send succeeds", () => {
+			const failures: unknown[] = [];
+			const { manager, transport } = createManager();
+			manager.addSendFailedListener((params) => failures.push(params));
+			manager.connect();
+			transport.simulateOpen();
+
+			const result = manager.send({ data: { action: "message" } });
+
+			expect(result).toBe(true);
+			expect(failures).toHaveLength(0);
+		});
+
+		it("does not track failed sends as in-flight", () => {
+			const { manager, transport } = createManager();
+			const dropped: { id: string; data: TTestClientMsg }[][] = [];
+			manager.addInFlightDropListener((messages) => dropped.push(messages));
+
+			// Offline send with an ackId — must not enter in-flight tracking.
+			manager.send({ data: { action: "message" }, ackId: "msg-1" });
+
+			manager.connect();
+			transport.simulateOpen();
+			transport.simulateClose();
+
+			expect(dropped).toHaveLength(0);
+		});
+
+		it("returns an unsubscribe function that stops notifications", () => {
+			const failures: unknown[] = [];
+			const transport = new MockTransport();
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+			});
+			const unsubscribe = manager.addSendFailedListener((params) =>
+				failures.push(params),
+			);
+
+			manager.send({ data: { action: "one" } });
+			unsubscribe();
+			manager.send({ data: { action: "two" } });
+
+			expect(failures).toHaveLength(1);
+		});
+	});
+
 	describe("onMessageReceived", () => {
 		it("passes deserialized message to onMessageReceived callback", () => {
 			const { manager, transport, rawMessages } = createManager();

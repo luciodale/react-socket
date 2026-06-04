@@ -99,6 +99,16 @@ export type TSendParams<TClientMsg> = {
 	ackId?: string;
 };
 
+/**
+ * Why a `send(...)` returned false: the socket was not connected at send
+ * time, or the transport threw on the wire write.
+ */
+export type TSendFailedReason = "not-connected" | "transport-error";
+
+export type TSendFailedParams<TClientMsg> = TSendParams<TClientMsg> & {
+	reason: TSendFailedReason;
+};
+
 // ── Manager snapshot ────────────────────────────────────────────────
 
 /**
@@ -136,6 +146,12 @@ export type TDebugEventPayload<TClientMsg, TServerMsg> =
 			type: "message-sent";
 			ackId: string | undefined;
 			raw: TWireData;
+			deserialized: TClientMsg;
+	  }
+	| {
+			type: "send-failed";
+			ackId: string | undefined;
+			reason: TSendFailedReason;
 			deserialized: TClientMsg;
 	  }
 	| {

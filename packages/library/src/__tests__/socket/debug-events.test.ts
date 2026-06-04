@@ -263,6 +263,51 @@ describe("WebSocketManager debug events", () => {
 		});
 	});
 
+	describe("send-failed events", () => {
+		it("emits with reason not-connected when sending while down", () => {
+			const { manager, events } = createManager();
+
+			manager.send({ data: { text: "hi" }, ackId: "msg1" });
+
+			const failedEvents = eventsOfType(events, "send-failed");
+			expect(failedEvents).toHaveLength(1);
+			expect(failedEvents[0].reason).toBe("not-connected");
+			expect(failedEvents[0].ackId).toBe("msg1");
+			expect(failedEvents[0].deserialized).toEqual({ text: "hi" });
+		});
+
+		it("emits with reason transport-error when the wire write throws", () => {
+			class ThrowingTransport extends MockTransport {
+				send(): void {
+					throw new Error("wire write failed");
+				}
+			}
+			const { manager, transport, events } = createManager({
+				transport: new ThrowingTransport(),
+			});
+			manager.connect();
+			transport.simulateOpen();
+
+			manager.send({ data: { text: "hi" } });
+
+			const failedEvents = eventsOfType(events, "send-failed");
+			expect(failedEvents).toHaveLength(1);
+			expect(failedEvents[0].reason).toBe("transport-error");
+			expect(failedEvents[0].ackId).toBeUndefined();
+		});
+
+		it("does NOT emit when the send succeeds", () => {
+			const { manager, transport, events } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+
+			manager.send({ data: { text: "hi" }, ackId: "msg1" });
+
+			const failedEvents = eventsOfType(events, "send-failed");
+			expect(failedEvents).toHaveLength(0);
+		});
+	});
+
 	describe("subscribe/unsubscribe events", () => {
 		it("emits subscribe with key, refCount, raw, deserialized", () => {
 			const { manager, transport, events } = createManager();

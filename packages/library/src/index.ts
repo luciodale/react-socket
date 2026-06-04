@@ -7,6 +7,7 @@ export {
 	useSocketPendingSubscription,
 	useSocketReady,
 	useSocketSend,
+	useSocketSendFailed,
 	useSocketSendIntent,
 	useSocketSubscription,
 } from "./hooks";
@@ -22,6 +23,8 @@ export type {
 	TIncomingData,
 	TManagerConfig,
 	TManagerSnapshot,
+	TSendFailedParams,
+	TSendFailedReason,
 	TSendParams,
 	TWireData,
 } from "./types";

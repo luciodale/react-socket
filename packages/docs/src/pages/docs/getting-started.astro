@@ -30,7 +30,7 @@ export const prerender = true;
 			react socket takes that layer off your plate. You define your message
 			types, wire up a few extractors, and the library handles socket
 			lifecycle, reconnection, keep alive, subscription management, and in
-			flight tracking. Ten React hooks, one job each, give you everything
+			flight tracking. Eleven React hooks, one job each, give you everything
 			you need at the call site. No message switch, no imperative glue.
 		</p>
 	</ContentSection>
@@ -41,7 +41,7 @@ export const prerender = true;
 				{
 					highlight: "One way per concern",
 					description:
-						"Each hook has exactly one job. Send, subscribe, batch, react to an event, observe connection state, observe pending subscription — ten hooks, zero overlap",
+						"Each hook has exactly one job. Send, subscribe, batch, react to an event, observe connection state, observe pending subscription — eleven hooks, zero overlap",
 					color: "accent",
 				},
 				{
@@ -132,7 +132,7 @@ export function Echo() {
 		</Callout>
 	</ContentSection>
 
-	<ContentSection label="The ten hooks">
+	<ContentSection label="The eleven hooks">
 		<CodeBlock
 			code={`// React to an incoming message of a given type
 useSocketEvent(manager, "notification", (msg) => { ... });
@@ -155,6 +155,9 @@ const { send } = useSocketSend(manager);
 
 // Fires on every send(), even offline — optimistic UI
 useSocketSendIntent(manager, ({ data, ackId }) => { ... });
+
+// Fires when a send() returns false — message never left the client
+useSocketSendFailed(manager, ({ data, ackId, reason }) => { ... });
 
 // Fires when in-flight messages are dropped on disconnect
 useSocketInFlightDrop(manager, (messages) => { ... });
@@ -226,6 +229,7 @@ const state = useSocketConnectionState(manager);`}
 			<li>
 				<strong class="text-white/80">Hooks</strong>
 				(<InlineCode>useSocketSendIntent</InlineCode>,
+				<InlineCode>useSocketSendFailed</InlineCode>,
 				<InlineCode>useSocketInFlightDrop</InlineCode>,
 				<InlineCode>useSocketReady</InlineCode>,
 				<InlineCode>useSocketLastUnsubscribe</InlineCode>,
@@ -234,6 +238,7 @@ const state = useSocketConnectionState(manager);`}
 			<li>
 				<strong class="text-white/80">Listener methods</strong>
 				(<InlineCode>manager.addSendIntentListener</InlineCode>,
+				<InlineCode>addSendFailedListener</InlineCode>,
 				<InlineCode>addInFlightDropListener</InlineCode>,
 				<InlineCode>addReadyListener</InlineCode>,
 				<InlineCode>addLastUnsubscribeListener</InlineCode>,

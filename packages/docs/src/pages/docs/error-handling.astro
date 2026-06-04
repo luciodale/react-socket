@@ -40,9 +40,24 @@ function handleSend(text: string) {
 			language="tsx"
 			filename="SendWithFallback.tsx"
 		/>
+		<p class="text-white/60 mb-4 leading-relaxed">
+			With many send sites, checking the boolean everywhere gets
+			repetitive. <InlineCode>useSocketSendFailed</InlineCode> observes
+			every failed send centrally — the message never left the client, and
+			<InlineCode>reason</InlineCode> tells you why:
+		</p>
+		<CodeBlock
+			code={`useSocketSendFailed(manager, ({ data, ackId, reason }) => {
+  // reason: "not-connected" | "transport-error"
+  if (ackId) useChatStore.getState().markFailed(ackId);
+});`}
+			language="tsx"
+			filename="SendFailedBridge.tsx"
+		/>
 		<Callout type="tip" title="Queue instead of dropping">
 			If you want the message to go out on the next reconnect, pair
 			<InlineCode>useSocketSendIntent</InlineCode> with
+			<InlineCode>useSocketSendFailed</InlineCode> and
 			<InlineCode>useSocketInFlightDrop</InlineCode> to capture and replay.
 			The <a href={href("/docs/undelivered-sync")} class="text-accent hover:underline">Undelivered Sync</a>
 			guide shows the full pattern.

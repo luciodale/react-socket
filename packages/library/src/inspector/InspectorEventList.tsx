@@ -32,6 +32,8 @@ function formatEventSummary<TClientMsg, TServerMsg>(
 			return truncate(JSON.stringify(e.deserialized), 60);
 		case "message-sent":
 			return truncate(JSON.stringify(e.deserialized), 60);
+		case "send-failed":
+			return `${e.reason}: ${truncate(JSON.stringify(e.deserialized), 45)}`;
 		case "subscribe":
 			return `${e.key} (ref: ${e.refCount})`;
 		case "unsubscribe":

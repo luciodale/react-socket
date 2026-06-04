@@ -7,6 +7,7 @@ import {
 	useSocketPendingSubscription,
 	useSocketReady,
 	useSocketSend,
+	useSocketSendFailed,
 	useSocketSendIntent,
 	useSocketSubscription,
 } from "../../../hooks";
@@ -252,6 +253,97 @@ describe("useSocketSendIntent", () => {
 			{ type: "chat", text: "offline" },
 			{ type: "chat", text: "online" },
 		]);
+	});
+});
+
+describe("useSocketSendFailed", () => {
+	it("fires for offline sends with reason not-connected, not for delivered ones", () => {
+		const transport = new MockTransport();
+		const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+			url: "ws://test",
+			transport,
+			serialize: (msg) => JSON.stringify(msg),
+			deserialize: (raw) => JSON.parse(raw) as TServerMsg,
+		});
+		const failures: { data: TClientMsg; ackId?: string; reason: string }[] = [];
+		renderHook(() =>
+			useSocketSendFailed(manager, ({ data, ackId, reason }) => {
+				failures.push({ data, ackId, reason });
+			}),
+		);
+
+		// offline send — fails
+		act(() => {
+			manager.send({ data: { type: "chat", text: "offline" }, ackId: "m1" });
+		});
+		// online send — succeeds, must not fire
+		act(() => {
+			manager.connect();
+			transport.simulateOpen();
+			manager.send({ data: { type: "chat", text: "online" } });
+		});
+
+		expect(failures).toEqual([
+			{
+				data: { type: "chat", text: "offline" },
+				ackId: "m1",
+				reason: "not-connected",
+			},
+		]);
+	});
+
+	it("stops firing after unmount", () => {
+		const transport = new MockTransport();
+		const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+			url: "ws://test",
+			transport,
+			serialize: (msg) => JSON.stringify(msg),
+			deserialize: (raw) => JSON.parse(raw) as TServerMsg,
+		});
+		const failures: TClientMsg[] = [];
+		const { unmount } = renderHook(() =>
+			useSocketSendFailed(manager, ({ data }) => {
+				failures.push(data);
+			}),
+		);
+
+		act(() => {
+			manager.send({ data: { type: "chat", text: "one" } });
+		});
+		unmount();
+		act(() => {
+			manager.send({ data: { type: "chat", text: "two" } });
+		});
+
+		expect(failures).toEqual([{ type: "chat", text: "one" }]);
+	});
+
+	it("uses the latest handler without resubscribing", () => {
+		const transport = new MockTransport();
+		const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+			url: "ws://test",
+			transport,
+			serialize: (msg) => JSON.stringify(msg),
+			deserialize: (raw) => JSON.parse(raw) as TServerMsg,
+		});
+		const seenBy: string[] = [];
+		const { rerender } = renderHook(
+			({ label }: { label: string }) =>
+				useSocketSendFailed(manager, () => {
+					seenBy.push(label);
+				}),
+			{ initialProps: { label: "first" } },
+		);
+
+		act(() => {
+			manager.send({ data: { type: "chat", text: "a" } });
+		});
+		rerender({ label: "second" });
+		act(() => {
+			manager.send({ data: { type: "chat", text: "b" } });
+		});
+
+		expect(seenBy).toEqual(["first", "second"]);
 	});
 });
 

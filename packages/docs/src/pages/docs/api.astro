@@ -12,7 +12,7 @@ export const prerender = true;
 <DocsPage title="API Reference">
 	<ContentSection label="API at a glance">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			react-socket exposes a single manager class and ten React hooks. Each
+			react-socket exposes a single manager class and eleven React hooks. Each
 			hook has one job. You never need to write a message switch, never touch
 			an internal lifecycle method from user code, never manually wire a
 			<InlineCode>useEffect</InlineCode> around a subscribe call.
@@ -39,6 +39,9 @@ export const prerender = true;
 
   // Fires on every send(), even when offline — optimistic UI
   useSocketSendIntent,
+
+  // Fires when a send() returns false — the message never left the client
+  useSocketSendFailed,
 
   // Fires when in-flight messages are dropped on disconnect
   useSocketInFlightDrop,
@@ -225,6 +228,28 @@ function onSubmit(text: string) {
 });`}
 			language="tsx"
 			filename="useSocketSendIntent.tsx"
+		/>
+	</ContentSection>
+
+	<ContentSection label="useSocketSendFailed">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			Fires when <InlineCode>send()</InlineCode> returns
+			<InlineCode>false</InlineCode> — the message never left the client.
+			<InlineCode>reason</InlineCode> is
+			<InlineCode>"not-connected"</InlineCode> (socket down at send time) or
+			<InlineCode>"transport-error"</InlineCode> (the wire write threw). The
+			outcome counterpart to <InlineCode>useSocketSendIntent</InlineCode>:
+			mark optimistic UI as failed or enqueue for resend centrally, without
+			checking the boolean at every call site. Messages that reached the
+			wire but die unacked surface through
+			<InlineCode>useSocketInFlightDrop</InlineCode> instead.
+		</p>
+		<CodeBlock
+			code={`useSocketSendFailed(manager, ({ data, ackId, reason }) => {
+  if (ackId) useChatStore.getState().markFailed(ackId);
+});`}
+			language="tsx"
+			filename="useSocketSendFailed.tsx"
 		/>
 	</ContentSection>
 
