@@ -1,7 +1,7 @@
 <div align="center">
   <img src="https://raw.githubusercontent.com/luciodale/react-socket/main/packages/docs/public/logo-accent.svg" alt="react-socket logo" width="120" height="120" />
   <h1>react-socket</h1>
-  <p>A TypeScript-first WebSocket manager for React. One hook per concern, zero imperative glue.</p>
+  <p>A TypeScript-first WebSocket manager for React. The type-safe web socket library for React apps: one hook per concern, zero imperative glue.</p>
 
   [Documentation](https://koolcodez.com/projects/react-socket) &nbsp;&middot;&nbsp; [NPM](https://www.npmjs.com/package/@luciodale/react-socket) &nbsp;&middot;&nbsp; [GitHub](https://github.com/luciodale/react-socket)
 
