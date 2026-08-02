@@ -144,7 +144,7 @@ useSocketEventBatch(manager, "tick", (msgs) => { ... }, { flushMs: 100 });
 useSocketSubscription(manager, {
   key: roomId,
   subscribe: { type: "subscribe", channel: roomId },
-  unsubscribe: { type: "unsubscribe", channel: roomId },
+  unsubscribe: (sub) => ({ type: "unsubscribe", channel: sub.channel }),
 });
 
 // "joining..." UI while a subscribe is pending

@@ -142,7 +142,8 @@ function useSpaceSubscription(spaceId: string) {
 	useSocketSubscription(manager, {
 		key: spaceId,
 		subscribe: { type: "subscribe", channel: spaceId },
-		unsubscribe: { type: "unsubscribe", channel: spaceId },
+		unsubscribe: (sub) =>
+			sub ? { type: "unsubscribe", channel: sub.channel } : undefined,
 	});
 }
 

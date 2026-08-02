@@ -126,7 +126,7 @@ function UnreadBadge({ roomId }: { roomId: string }) {
   useSocketSubscription(manager, {
     key: "presence",
     subscribe: { type: "sub-presence" },
-    unsubscribe: { type: "unsub-presence" },
+    unsubscribe: () => ({ type: "unsub-presence" }),
   });
   return null;
 }`}
@@ -156,7 +156,7 @@ function UnreadBadge({ roomId }: { roomId: string }) {
   useSocketSubscription(manager, {
     key: roomId,
     subscribe: { type: "subscribe", channel: roomId },
-    unsubscribe: { type: "unsubscribe", channel: roomId },
+    unsubscribe: (sub) => ({ type: "unsubscribe", channel: sub.channel }),
   });
 
   const joining = useSocketPendingSubscription(manager, roomId);

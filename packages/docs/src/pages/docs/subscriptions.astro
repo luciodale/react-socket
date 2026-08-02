@@ -25,15 +25,19 @@ export const prerender = true;
 		<p class="text-white/60 mb-4 leading-relaxed">
 			<InlineCode>useSocketSubscription</InlineCode> owns the lifecycle.
 			The <InlineCode>key</InlineCode> is the ref counted identifier. The
-			<InlineCode>subscribe</InlineCode> and
-			<InlineCode>unsubscribe</InlineCode> payloads are typed against
-			<InlineCode>TClientMsg</InlineCode>.
+			<InlineCode>subscribe</InlineCode> is a payload;
+			<InlineCode>unsubscribe</InlineCode> is a callback that receives the
+			exact <InlineCode>subscribe</InlineCode> payload frozen at mount and
+			returns the leave message. Deriving the leave message from that
+			argument keeps it correct even after a route param has cleared — a
+			plain value would go out with the emptied param. Both are typed
+			against <InlineCode>TClientMsg</InlineCode>.
 		</p>
 		<CodeBlock
 			code={`useSocketSubscription(manager, {
   key: "chat:general",
   subscribe: { type: "subscribe", channel: "general" },
-  unsubscribe: { type: "unsubscribe", channel: "general" },
+  unsubscribe: () => ({ type: "unsubscribe", channel: "general" }),
 });`}
 			language="tsx"
 			filename="basic.tsx"
@@ -47,7 +51,7 @@ export const prerender = true;
 			resource's protocol — and have every consumer use the wrapper. The
 			<InlineCode>key</InlineCode>, the
 			<InlineCode>subscribe</InlineCode> payload, and the
-			<InlineCode>unsubscribe</InlineCode> payload all derive from the same
+			<InlineCode>unsubscribe</InlineCode> callback all derive from the same
 			input, so it is impossible for two call sites to drift apart.
 		</p>
 		<CodeBlock
@@ -62,9 +66,7 @@ export function useSpaceSubscription(spaceId: string | null) {
     subscribe: spaceId
       ? { type: "subscribe", channel: spaceId }
       : undefined,
-    unsubscribe: spaceId
-      ? { type: "unsubscribe", channel: spaceId }
-      : undefined,
+    unsubscribe: (sub) => ({ type: "unsubscribe", channel: sub.channel }),
   });
 }`}
 			language="tsx"
@@ -126,7 +128,7 @@ function MessageList({ spaceId }: { spaceId: string }) {
   useSocketSubscription(manager, {
     key: \`price:\${ticker}\`,
     subscribe: { type: "subscribe", channel: ticker },
-    unsubscribe: { type: "unsubscribe", channel: ticker },
+    unsubscribe: (sub) => ({ type: "unsubscribe", channel: sub.channel }),
   });
   const price = usePriceStore((s) => s.prices[ticker]);
   return <span>{price}</span>;
@@ -183,7 +185,7 @@ function PriceBridge() {
   useSocketSubscription(manager, {
     key: id,
     subscribe: { type: "subscribe", channel: id },
-    unsubscribe: { type: "unsubscribe", channel: id },
+    unsubscribe: (sub) => ({ type: "unsubscribe", channel: sub.channel }),
   });
 
   const joining = useSocketPendingSubscription(manager, id);
@@ -217,7 +219,7 @@ function PriceBridge() {
   useSocketSubscription(manager, {
     key: "presence",
     subscribe: { type: "sub-presence" },
-    unsubscribe: { type: "unsub-presence" },
+    unsubscribe: () => ({ type: "unsub-presence" }),
   });
   return null;
 }`}

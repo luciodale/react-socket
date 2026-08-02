@@ -180,7 +180,7 @@ describe("useSocketSubscription", () => {
 			useSocketSubscription(manager, {
 				key: "room:1",
 				subscribe: { type: "sub", key: "room:1" },
-				unsubscribe: { type: "sub", key: "room:1" },
+				unsubscribe: (sub) => sub,
 			}),
 		);
 
@@ -278,6 +278,34 @@ describe("useSocketSubscription", () => {
 
 		// mount → unmount → remount must net to a single ref, not two.
 		expect(manager.getRefCount("room:1")).toBe(1);
+	});
+
+	it("hands the unsubscribe callback the frozen subscribe payload, not the latest render", () => {
+		const { manager, transport } = createManager();
+
+		const { rerender, unmount } = renderHook(
+			({ roomKey }: { roomKey: string }) =>
+				useSocketSubscription(manager, {
+					// The subscription key is stable; only the payload param moves.
+					key: "room",
+					subscribe: { type: "sub", key: roomKey },
+					// Echo the frozen subscribe payload back onto the wire.
+					unsubscribe: (sub) => sub,
+				}),
+			{ initialProps: { roomKey: "abc" } },
+		);
+
+		// Simulate the route param clearing before unmount (navigate away).
+		rerender({ roomKey: "" });
+
+		// Ignore the subscribe frame; only assert on the unsubscribe.
+		transport.sentMessages.length = 0;
+		unmount();
+
+		// The wire unsubscribe must carry the ORIGINAL "abc", not the emptied "".
+		expect(transport.sentMessages).toEqual([
+			JSON.stringify({ type: "sub", key: "abc" }),
+		]);
 	});
 });
 

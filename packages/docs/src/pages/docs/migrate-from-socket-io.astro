@@ -63,7 +63,7 @@ function ChatRoom({ room }: { room: string }) {
   useSocketSubscription(manager, {
     key: room,
     subscribe: { type: "join", room },
-    unsubscribe: { type: "leave", room },
+    unsubscribe: (sub) => ({ type: "leave", room: sub.room }),
   });
 
   useSocketEvent(manager, "chat", (msg) => appendMessage(msg));

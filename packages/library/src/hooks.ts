@@ -191,21 +191,33 @@ type TSubscribable<TClientMsg> = {
  * `true → false` unsubscribes. Mirrors React Query's `enabled` semantics.
  *
  * **Payload timing.** The `subscribe` payload is read once, when the
- * effect runs (mount, key change, or `enabled` flip), and stored for
- * replay on reconnect. Changing it between renders without changing
- * `key`/`enabled` does NOT re-send. The `unsubscribe` payload is read at
- * unmount time (latest ref), so updates between mount and unmount are
- * picked up. To push a new subscribe payload, change `key` or toggle
- * `enabled`.
+ * effect runs (mount, key change, or `enabled` flip), and frozen for the
+ * lifetime of that subscription — for replay on reconnect AND as the
+ * argument handed to the `unsubscribe` callback at unmount. Changing it
+ * between renders without changing `key`/`enabled` does NOT re-send. To
+ * push a new subscribe payload, change `key` or toggle `enabled`.
+ *
+ * **`unsubscribe` is a callback, not a value.** It receives the exact
+ * `subscribe` payload frozen when this subscription began and returns the
+ * wire message to send on the way out (or `undefined` for no wire send).
+ * This is deliberate: reading a plain unsubscribe object at unmount would
+ * capture the LATEST render, so a payload derived from a route param
+ * (`spaceId`) would go out as an empty string the instant the user
+ * navigates away and the param clears. Deriving the leave message from the
+ * frozen argument keeps it correct regardless of the live params:
+ * `unsubscribe: (sub) => ({ type: "leave", spaceId: sub.spaceId })`.
  *
  * **First-payload wins.** When multiple components subscribe to the same
  * `key`, only the first payload is sent on the wire and stored for replay
  * on reconnect. Later subscribers only bump the ref count. Combining
  * `enabled: false → true` with an existing subscription on the same key
- * means the late joiner's payload never reaches the wire. Wrap in a
- * custom hook so two call sites cannot drift apart. If your protocol
- * needs each joiner to identify itself, send a separate `useSocketSend`
- * message instead of relying on the subscribe payload.
+ * means the late joiner's payload never reaches the wire. And when the
+ * last subscriber leaves, the wire `unsubscribe` is built from THAT
+ * unmounter's frozen `subscribe` payload, so if two call sites on one key
+ * drift apart their leave messages can differ. Wrap in a custom hook so
+ * two call sites cannot drift apart. If your protocol needs each joiner to
+ * identify itself, send a separate `useSocketSend` message instead of
+ * relying on the subscribe payload.
  *
  * **Subscribe with no payload** is supported (bookkeeping-only ref count,
  * no wire send). `useSocketPendingSubscription` will not flip to `true`
@@ -219,7 +231,7 @@ type TSubscribable<TClientMsg> = {
  *     key: spaceId ?? "",
  *     enabled: spaceId !== null,
  *     subscribe: spaceId ? { type: "join", spaceId } : undefined,
- *     unsubscribe: spaceId ? { type: "leave", spaceId } : undefined,
+ *     unsubscribe: (sub) => (sub ? { type: "leave", spaceId: sub.spaceId } : undefined),
  *   });
  * }
  * ```
@@ -229,7 +241,9 @@ export function useSocketSubscription<TClientMsg>(
 	args: {
 		key: string;
 		subscribe?: TClientMsg;
-		unsubscribe?: TClientMsg;
+		unsubscribe?: (
+			subscribePayload: TClientMsg | undefined,
+		) => TClientMsg | undefined;
 		enabled?: boolean;
 	},
 ): void {
@@ -241,9 +255,13 @@ export function useSocketSubscription<TClientMsg>(
 
 	useEffect(() => {
 		if (!enabled) return;
-		manager.subscribe(key, subscribeRef.current);
+		// Freeze the payload used at subscribe time. The unsubscribe callback
+		// is handed this exact value at unmount, so a leave message derived
+		// from a route param stays correct even after the param has cleared.
+		const subscribePayload = subscribeRef.current;
+		manager.subscribe(key, subscribePayload);
 		return () => {
-			manager.unsubscribe(key, unsubscribeRef.current);
+			manager.unsubscribe(key, unsubscribeRef.current?.(subscribePayload));
 		};
 	}, [manager, key, enabled]);
 }

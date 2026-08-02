@@ -161,9 +161,12 @@ manager.dispose();`}
 	<ContentSection label="useSocketSubscription">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			Owns the lifecycle of a ref counted subscription. Sends the
-			<InlineCode>subscribe</InlineCode> payload on mount and the
-			<InlineCode>unsubscribe</InlineCode> payload on unmount. Both are typed
-			against <InlineCode>TClientMsg</InlineCode>. The
+			<InlineCode>subscribe</InlineCode> payload on mount. On unmount it calls
+			the <InlineCode>unsubscribe</InlineCode> callback with the exact
+			<InlineCode>subscribe</InlineCode> payload frozen at mount and sends
+			what it returns — so a leave message derived from a route param stays
+			correct even after the param clears. Both are typed against
+			<InlineCode>TClientMsg</InlineCode>. The
 			<InlineCode>key</InlineCode> is the ref counted identifier the library
 			uses internally.
 		</p>
@@ -171,7 +174,7 @@ manager.dispose();`}
 			code={`useSocketSubscription(manager, {
   key: roomId,
   subscribe: { type: "subscribe", channel: roomId },
-  unsubscribe: { type: "unsubscribe", channel: roomId },
+  unsubscribe: (sub) => ({ type: "unsubscribe", channel: sub.channel }),
 });`}
 			language="tsx"
 			filename="useSocketSubscription.tsx"

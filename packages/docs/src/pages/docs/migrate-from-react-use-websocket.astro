@@ -84,7 +84,7 @@ const refCountedSample = `// react-use-websocket: each component opens its own W
 useSocketSubscription(manager, {
   key: "room:" + roomId,
   subscribe: { type: "subscribe", roomId },
-  unsubscribe: { type: "unsubscribe", roomId },
+  unsubscribe: (sub) => ({ type: "unsubscribe", roomId: sub.roomId }),
 });`;
 ---
 

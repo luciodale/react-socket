@@ -62,7 +62,7 @@ export const prerender = true;
   useSocketSubscription(manager, {
     key: spaceId,
     subscribe: { type: "subscribe", channel: spaceId },
-    unsubscribe: { type: "unsubscribe", channel: spaceId },
+    unsubscribe: (sub) => ({ type: "unsubscribe", channel: sub.channel }),
   });
 }`}
 			language="tsx"
