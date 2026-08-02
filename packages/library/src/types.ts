@@ -43,6 +43,19 @@ export interface IWebSocketTransport {
 	onerror: ((event: Event) => void) | null;
 }
 
+// ── Before-connect hook ─────────────────────────────────────────────
+
+/**
+ * Context handed to `beforeConnect` on each connection attempt. `trigger`
+ * says why the attempt is happening; `attempt` is the reconnect counter —
+ * `0` on the first connect and on `forceReconnect()`, `N` on the Nth
+ * scheduled retry.
+ */
+export type TBeforeConnectContext = {
+	attempt: number;
+	trigger: "connect" | "reconnect" | "forceReconnect";
+};
+
 // ── Manager config ──────────────────────────────────────────────────
 
 export type TManagerConfig<
@@ -84,6 +97,19 @@ export type TManagerConfig<
 	isPong?: (msg: TServerMsg) => boolean;
 	getAckId?: (msg: TServerMsg) => string | undefined;
 	getSubscriptionResolvedKey?: (msg: TServerMsg) => string | undefined;
+	/**
+	 * Runs before every connection attempt — the first connect, each
+	 * scheduled reconnect retry, and `forceReconnect()` — awaited before the
+	 * socket opens (and before a dynamic `url()` is resolved, so you can
+	 * refresh a token or call `setProtocols()` here first). Use it for
+	 * bespoke per-attempt prep that must complete before the wire opens.
+	 *
+	 * Distinct from `onReady`, which fires AFTER the socket is open. If this
+	 * throws or rejects the attempt is aborted and the manager transitions
+	 * to `"disconnected"` with no automatic retry — drive reconnection
+	 * yourself, or let a network `online` event pick it back up.
+	 */
+	beforeConnect?: (ctx: TBeforeConnectContext) => void | Promise<void>;
 	// Construction-time callbacks. The other lifecycle events
 	// (send-intent, connection-state-change, in-flight-drop, last-unsubscribe)
 	// are exposed through `addXxxListener` methods on the manager. Wire those
@@ -181,6 +207,7 @@ export type TDebugEventPayload<TClientMsg, TServerMsg> =
 	| { type: "ready"; restoredKeys: string[] }
 	| { type: "deserialize-error"; raw: TIncomingData; error: unknown }
 	| { type: "url-resolve-error"; error: unknown }
+	| { type: "before-connect-error"; error: unknown }
 	| { type: "transport-error" }
 	| { type: "dispose" };
 

@@ -158,6 +158,13 @@ const manager = new WebSocketManager<TClientMsg, TServerMsg>({
 			re-auth automatically when the socket drops and comes back. A
 			<InlineCode>useEffect</InlineCode> on mount would only fire once.
 		</Callout>
+		<Callout type="tip" title="beforeConnect vs onReady">
+			Need the token <em>in the connection itself</em> (query string,
+			subprotocol) rather than as a first frame? Refresh it in
+			<InlineCode>beforeConnect</InlineCode>, awaited before the socket opens
+			on every attempt. Reach for <InlineCode>onReady</InlineCode> when the
+			token travels as the first message after the socket is already open.
+		</Callout>
 	</ContentSection>
 
 	<ContentSection label="Server challenge / mid-session re-auth">

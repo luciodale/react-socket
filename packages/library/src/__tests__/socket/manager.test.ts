@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketManager } from "../../manager";
-import type { TConnectionState, TDebugEvent } from "../../types";
+import type {
+	TBeforeConnectContext,
+	TConnectionState,
+	TDebugEvent,
+} from "../../types";
 import { MockTransport } from "../helpers/mock-transport";
 
 // ── Test types ──────────────────────────────────────────────────────
@@ -1865,6 +1869,156 @@ describe("WebSocketManager", () => {
 				expect(transport.connectCalls).toHaveLength(1);
 			});
 			expect(transport.connectCalls[0].url).toBe("ws://test?token=fresh");
+		});
+	});
+
+	describe("beforeConnect", () => {
+		it("awaits beforeConnect before opening the socket on the first connect", async () => {
+			const transport = new MockTransport();
+			let release!: () => void;
+			const gate = new Promise<void>((r) => {
+				release = r;
+			});
+			const beforeConnect = vi.fn(() => gate);
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+				beforeConnect,
+			});
+
+			manager.connect();
+			// Gated: state is already "connecting" but no socket has opened.
+			expect(beforeConnect).toHaveBeenCalledTimes(1);
+			expect(beforeConnect).toHaveBeenCalledWith({
+				attempt: 0,
+				trigger: "connect",
+			});
+			expect(transport.connectCalls).toHaveLength(0);
+			expect(manager.getConnectionState()).toBe("connecting");
+
+			release();
+			await vi.waitFor(() => {
+				expect(transport.connectCalls).toHaveLength(1);
+			});
+		});
+
+		it("runs beforeConnect on a scheduled reconnect with trigger 'reconnect'", async () => {
+			const transport = new MockTransport();
+			const calls: TBeforeConnectContext[] = [];
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+				reconnectBaseDelayMs: 10,
+				reconnectMaxDelayMs: 100,
+				reconnectMaxAttempts: 3,
+				beforeConnect: (ctx) => {
+					calls.push(ctx);
+				},
+			});
+
+			manager.connect();
+			await vi.waitFor(() => expect(transport.connectCalls).toHaveLength(1));
+			transport.simulateOpen();
+
+			transport.simulateClose(1006);
+			await vi.advanceTimersByTimeAsync(200);
+
+			expect(calls[0]).toEqual({ attempt: 0, trigger: "connect" });
+			expect(calls.some((c) => c.trigger === "reconnect")).toBe(true);
+			expect(transport.connectCalls.length).toBeGreaterThanOrEqual(2);
+		});
+
+		it("runs beforeConnect with trigger 'forceReconnect' on forceReconnect()", async () => {
+			const transport = new MockTransport();
+			const calls: TBeforeConnectContext[] = [];
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+				beforeConnect: (ctx) => {
+					calls.push(ctx);
+				},
+			});
+
+			manager.connect();
+			await vi.waitFor(() => expect(transport.connectCalls).toHaveLength(1));
+			transport.simulateOpen();
+
+			manager.forceReconnect();
+			await vi.waitFor(() => expect(transport.connectCalls).toHaveLength(2));
+
+			expect(calls).toEqual([
+				{ attempt: 0, trigger: "connect" },
+				{ attempt: 0, trigger: "forceReconnect" },
+			]);
+		});
+
+		it("aborts to disconnected and emits before-connect-error when beforeConnect throws", async () => {
+			const transport = new MockTransport();
+			const debugEvents: string[] = [];
+			const states: TConnectionState[] = [];
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+				beforeConnect: () => {
+					throw new Error("prep failed");
+				},
+				onDebug: (e) => debugEvents.push(e.type),
+			});
+			manager.addConnectionStateListener(() =>
+				states.push(manager.getConnectionState()),
+			);
+
+			manager.connect();
+			await vi.waitFor(() => {
+				expect(manager.getConnectionState()).toBe("disconnected");
+			});
+			expect(transport.connectCalls).toHaveLength(0);
+			expect(debugEvents).toContain("before-connect-error");
+			expect(states).toEqual(["connecting", "disconnected"]);
+		});
+
+		it("runs beforeConnect before resolving a dynamic url", async () => {
+			const transport = new MockTransport();
+			const order: string[] = [];
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: () => {
+					order.push("url");
+					return "ws://test?token=1";
+				},
+				transport,
+				beforeConnect: () => {
+					order.push("beforeConnect");
+				},
+			});
+
+			manager.connect();
+			await vi.waitFor(() => expect(transport.connectCalls).toHaveLength(1));
+			expect(order).toEqual(["beforeConnect", "url"]);
+		});
+
+		it("does not open the socket if disconnect() lands during the beforeConnect await", async () => {
+			const transport = new MockTransport();
+			let release!: () => void;
+			const gate = new Promise<void>((r) => {
+				release = r;
+			});
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+				beforeConnect: () => gate,
+			});
+
+			manager.connect();
+			manager.disconnect();
+			release();
+			await vi.advanceTimersByTimeAsync(10);
+			expect(transport.connectCalls).toHaveLength(0);
 		});
 	});
 

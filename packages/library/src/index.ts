@@ -17,6 +17,7 @@ export type { IStorage } from "./storage";
 export { createLocalStorage } from "./storage";
 export type {
 	IWebSocketTransport,
+	TBeforeConnectContext,
 	TConnectionState,
 	TDebugEvent,
 	TDebugEventPayload,

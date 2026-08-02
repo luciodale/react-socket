@@ -38,6 +38,38 @@ export const prerender = true;
 		</p>
 	</ContentSection>
 
+	<ContentSection label="Run logic before each attempt">
+		<p class="text-white/60 mb-4 leading-relaxed">
+			<InlineCode>beforeConnect</InlineCode> is awaited before every
+			connection attempt — the first connect, each scheduled retry, and
+			<InlineCode>forceReconnect()</InlineCode> — and before a dynamic
+			<InlineCode>url()</InlineCode> resolves. It runs on <em>every</em>
+			attempt, not once per reconnection, so it is the seam to refresh an
+			auth token that may have expired during a long backoff, or to call
+			<InlineCode>setProtocols()</InlineCode> before the socket opens.
+		</p>
+		<CodeBlock
+			code={`new WebSocketManager<TClientMsg, TServerMsg>({
+  // ...
+  async beforeConnect({ trigger, attempt }) {
+    // Runs before the socket opens on attempt 0, 1, 2, ...
+    await auth.ensureFreshToken();
+  },
+});`}
+			language="tsx"
+			filename="before-connect.ts"
+		/>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			If <InlineCode>beforeConnect</InlineCode> throws or rejects, the attempt
+			is aborted and the manager transitions to
+			<InlineCode>"disconnected"</InlineCode> with no automatic retry — drive
+			the next connect yourself, or let a network
+			<InlineCode>online</InlineCode> event pick it back up. Contrast with
+			<InlineCode>onReady</InlineCode>, which fires <em>after</em> the socket
+			is open.
+		</p>
+	</ContentSection>
+
 	<ContentSection label="Exponential Backoff">
 		<p class="text-white/60 mb-4 leading-relaxed">
 			Each retry waits longer than the last, with a random 0–1000ms

@@ -8,6 +8,7 @@ import {
 import { createTransport } from "./transport";
 import type {
 	IWebSocketTransport,
+	TBeforeConnectContext,
 	TConnectionState,
 	TDebugEvent,
 	TDebugEventPayload,
@@ -79,6 +80,11 @@ export class WebSocketManager<
 		TServerMsg,
 		TKey
 	>["onDebug"];
+	private readonly beforeConnect: TManagerConfig<
+		TClientMsg,
+		TServerMsg,
+		TKey
+	>["beforeConnect"];
 
 	private readonly subscriptionRefCounts = new Map<string, number>();
 	private readonly subscriptionData = new Map<string, TClientMsg | undefined>();
@@ -153,6 +159,7 @@ export class WebSocketManager<
 		this.getSubscriptionResolvedKeyCb = config.getSubscriptionResolvedKey;
 		this.onReady = config.onReady;
 		this.onDebugCb = config.onDebug;
+		this.beforeConnect = config.beforeConnect;
 
 		this.handleOnline = this.handleOnline.bind(this);
 		this.handleOffline = this.handleOffline.bind(this);
@@ -187,12 +194,34 @@ export class WebSocketManager<
 		this.transport.onmessage = (e) => this.handleMessage(e);
 		this.transport.onerror = () => this.emitDebug({ type: "transport-error" });
 
-		this.initiateTransportConnect(++this.connectAttemptId);
+		this.initiateTransportConnect(++this.connectAttemptId, "connect");
 
 		this.addWindowListeners();
 	}
 
-	private initiateTransportConnect(attemptId: number): void {
+	private async initiateTransportConnect(
+		attemptId: number,
+		trigger: TBeforeConnectContext["trigger"],
+	): Promise<void> {
+		if (this.beforeConnect) {
+			try {
+				await this.beforeConnect({ attempt: this.reconnectAttempt, trigger });
+			} catch (error) {
+				// Superseded by a newer connect/disconnect during the await.
+				if (attemptId !== this.connectAttemptId) return;
+				this.emitDebug({ type: "before-connect-error", error });
+				if (this.intentionalClose || this.disposed) return;
+				// Abort this attempt. No automatic retry — the app drives the
+				// next connect, or a network `online` event picks it back up.
+				this.setConnectionState("disconnected");
+				return;
+			}
+			// Re-check staleness/intent after the await, mirroring the dynamic
+			// url path: a disconnect/dispose may have landed while we waited.
+			if (attemptId !== this.connectAttemptId) return;
+			if (this.intentionalClose || this.disposed) return;
+		}
+
 		if (this.urlStatic !== null) {
 			this.transport.connect(
 				this.urlStatic,
@@ -265,7 +294,7 @@ export class WebSocketManager<
 		this.transport.onmessage = (e) => this.handleMessage(e);
 		this.transport.onerror = () => this.emitDebug({ type: "transport-error" });
 
-		this.initiateTransportConnect(++this.connectAttemptId);
+		this.initiateTransportConnect(++this.connectAttemptId, "forceReconnect");
 		this.addWindowListeners();
 	}
 
@@ -674,7 +703,7 @@ export class WebSocketManager<
 			this.transport.onmessage = (e) => this.handleMessage(e);
 			this.transport.onerror = () =>
 				this.emitDebug({ type: "transport-error" });
-			this.initiateTransportConnect(++this.connectAttemptId);
+			this.initiateTransportConnect(++this.connectAttemptId, "reconnect");
 		}, delay);
 	}
 

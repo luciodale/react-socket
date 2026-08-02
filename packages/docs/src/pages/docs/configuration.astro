@@ -39,6 +39,7 @@ export const prerender = true;
 				{ name: "reconnectMaxDelayMs", type: "number", defaultValue: "30000", description: "Maximum reconnection delay (cap on the exponential backoff)" },
 				{ name: "transport", type: "IWebSocketTransport", description: "Custom WebSocket transport for testing or non-browser environments" },
 				{ name: "binaryType", type: '"blob" | "arraybuffer"', description: "Tell the transport which binary type to deliver. Required when sending or receiving binary frames; widen the manager's TWire / TIncoming generics accordingly" },
+				{ name: "beforeConnect", type: "(ctx: TBeforeConnectContext) => void | Promise<void>", description: "Awaited before every connection attempt — first connect, each reconnect retry, and forceReconnect() — and before a dynamic url() resolves. Refresh an auth token or call setProtocols() here. If it throws, the attempt aborts to \"disconnected\" with no auto-retry; a network online event can pick it back up" },
 				{ name: "onReady", type: "(restoredKeys: string[]) => void", description: "Fires after every (re)connect once subscriptions are restored. Best place for first-message auth and refetch logic that must run before any component mounts" },
 				{ name: "onDebug", type: "(event: TDebugEvent) => void", description: "Fires for every internal lifecycle event. Best place for production telemetry that should always run" },
 			]}
@@ -169,12 +170,18 @@ useSocketEvent(manager, "notification", (msg) => {
 
 	<ContentSection label="Lifecycle: config vs listener">
 		<p class="text-white/60 mb-4 leading-relaxed">
-			Two lifecycle events are exposed as construction-time callbacks
-			because they need to fire before any component mounts:
+			Three lifecycle events are exposed as construction-time callbacks
+			because they run outside the React tree, before any component mounts:
 		</p>
 		<CodeBlock
 			code={`new WebSocketManager<TClientMsg, TServerMsg>({
   // ...
+
+  // Awaited before EVERY attempt (first connect, each retry, forceReconnect),
+  // before the socket opens. Refresh a token that may expire mid-backoff.
+  async beforeConnect({ trigger, attempt }) {
+    await auth.ensureFreshToken();
+  },
 
   // Fires after every (re)connect, once subscriptions are restored.
   // Best place for first-message auth (no React mount needed).
