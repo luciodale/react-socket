@@ -185,9 +185,23 @@ export class WebSocketManager<
 			clearTimeout(this.reconnectTimer);
 			this.reconnectTimer = null;
 		}
+		// A fired reconnect timer may still be mid-attempt (dynamic url
+		// resolving, socket CONNECTING). Kill it so only one attempt is ever
+		// live — otherwise this connect opens a second, orphaned socket.
+		if (this.connectionState === "reconnecting") {
+			this.detachTransportHandlers();
+			this.transport.disconnect(4000, "superseded by connect");
+		}
 
 		this.intentionalClose = false;
+		// Manual connect starts a fresh retry budget. Without this, a
+		// connect() after reconnect exhaustion inherits attempt=max and gives
+		// up on the first drop (and beforeConnect reports a stale attempt).
+		this.reconnectAttempt = 0;
 		this.setConnectionState("connecting");
+		// A state listener may have called disconnect()/dispose() during the
+		// emit — honor it instead of opening a socket they just refused.
+		if (this.intentionalClose || this.disposed) return;
 
 		this.transport.onopen = () => this.handleOpen();
 		this.transport.onclose = (e) => this.handleClose(e);
@@ -258,29 +272,31 @@ export class WebSocketManager<
 	disconnect(): void {
 		this.intentionalClose = true;
 		this.clearTimers();
-		this.clearPendingSubscriptions();
-		this.dropInFlight();
 		this.transport.disconnect(1000, "client disconnect");
+		// Remove window listeners BEFORE the state emit: a listener may
+		// reentrantly call connect(), which re-attaches them — removing
+		// afterwards would strip the fresh connection's listeners.
+		this.removeWindowListeners();
 		// An idle manager was never started — disconnect() must not fabricate
 		// a transition. `idle` is exited only by connect()/forceReconnect().
 		if (this.connectionState !== "idle") {
 			this.setConnectionState("disconnected");
 		}
-		this.removeWindowListeners();
+		// Settle bookkeeping AFTER the state flip so drop/pending listeners
+		// observe "disconnected" — a send() from a drop handler must fail as
+		// not-connected instead of writing to a dead socket and re-inserting
+		// a ghost in-flight entry.
+		this.clearPendingSubscriptions();
+		this.dropInFlight();
 	}
 
 	forceReconnect(): void {
 		if (this.disposed) return;
 		this.clearTimers();
-		this.clearPendingSubscriptions();
-		this.dropInFlight();
 
 		// Detach old handlers so a stale ws cannot fire close/open/message/error
 		// after we have moved on.
-		this.transport.onclose = null;
-		this.transport.onopen = null;
-		this.transport.onmessage = null;
-		this.transport.onerror = null;
+		this.detachTransportHandlers();
 		this.transport.disconnect(4000, "force reconnect");
 
 		// Skip the "disconnected" blip — go straight to "connecting" so UI
@@ -288,6 +304,13 @@ export class WebSocketManager<
 		this.intentionalClose = false;
 		this.reconnectAttempt = 0;
 		this.setConnectionState("connecting");
+		// A state listener may have called disconnect()/dispose() during the
+		// emit — honor it instead of opening a socket they just refused.
+		if (this.intentionalClose || this.disposed) return;
+
+		// Settle bookkeeping after the state flip (see disconnect()).
+		this.clearPendingSubscriptions();
+		this.dropInFlight();
 
 		this.transport.onopen = () => this.handleOpen();
 		this.transport.onclose = (e) => this.handleClose(e);
@@ -541,6 +564,11 @@ export class WebSocketManager<
 	private handleOpen(): void {
 		this.reconnectAttempt = 0;
 		this.setConnectionState("connected");
+		// A state listener may have called disconnect()/forceReconnect()
+		// during the emit. Proceeding would arm a heartbeat nothing will ever
+		// clear, replay subscriptions onto a dead socket, and fire ready on a
+		// manager that is no longer connected.
+		if (this.connectionState !== "connected") return;
 		this.startPingInterval();
 		const restoredKeys = this.restoreSubscriptions();
 		this.onReady?.(restoredKeys);
@@ -549,24 +577,39 @@ export class WebSocketManager<
 	}
 
 	private handleClose(event: CloseEvent): void {
+		// Ordering rule for every teardown path: the connection state settles
+		// FIRST, bookkeeping emits (pending-subscription, in-flight-drop)
+		// fire after. Listeners reacting to a drop must observe the
+		// post-close state so a resend attempt fails as not-connected
+		// instead of "succeeding" onto a dead socket.
 		this.clearTimers();
-		this.clearPendingSubscriptions();
-		this.dropInFlight();
 
 		if (this.intentionalClose || this.disposed) {
 			// Terminal close: stop the dead socket firing stray events.
 			this.detachTransportHandlers();
 			this.setConnectionState("disconnected");
+			this.clearPendingSubscriptions();
+			this.dropInFlight();
 			return;
 		}
 
 		if (event.code === 1000) {
 			this.detachTransportHandlers();
+			// A server-initiated clean close is terminal until connect() is
+			// called again. Drop the window listeners so a later browser
+			// `online` event cannot resurrect a session the server
+			// deliberately ended. (Before the state emit: a listener may
+			// reentrantly connect(), which re-attaches them.)
+			this.removeWindowListeners();
 			this.setConnectionState("disconnected");
+			this.clearPendingSubscriptions();
+			this.dropInFlight();
 			return;
 		}
 
 		this.scheduleReconnect();
+		this.clearPendingSubscriptions();
+		this.dropInFlight();
 	}
 
 	private handleMessage(event: MessageEvent): void {
@@ -619,6 +662,13 @@ export class WebSocketManager<
 			this.connectionState === "disconnected" ||
 			this.connectionState === "reconnecting"
 		) {
+			// Supersede any in-flight attempt (a fired timer resolving a
+			// dynamic url, or a socket mid-CONNECT). Without this, the stale
+			// attempt AND the one scheduled below both connect — two live
+			// sockets, no disconnect in between.
+			this.connectAttemptId++;
+			this.detachTransportHandlers();
+			this.transport.disconnect(4000, "online reconnect");
 			this.reconnectAttempt = 0;
 			this.scheduleReconnect();
 		}
@@ -628,14 +678,15 @@ export class WebSocketManager<
 		this.clearTimers();
 		// Supersede any in-flight dynamic url resolution.
 		this.connectAttemptId++;
-		// Settle state the bypassed handleClose would have settled.
-		this.clearPendingSubscriptions();
-		this.dropInFlight();
 		// Detach all transport handlers so a stale ws cannot fire close /
 		// open / message / error after we have moved on.
 		this.detachTransportHandlers();
 		this.transport.disconnect(4000, "offline");
 		this.setConnectionState("reconnecting");
+		// Settle the state the bypassed handleClose would have settled —
+		// AFTER the state flip (see handleClose ordering rule).
+		this.clearPendingSubscriptions();
+		this.dropInFlight();
 	}
 
 	private handleVisibilityChange(): void {
@@ -683,6 +734,10 @@ export class WebSocketManager<
 		}
 
 		this.setConnectionState("reconnecting");
+		// A state listener may have called disconnect()/dispose() during the
+		// emit. Arming the timer anyway would resurrect the connection they
+		// just tore down (disconnect cleared a timer that did not exist yet).
+		if (this.intentionalClose || this.disposed) return;
 
 		const delay = Math.min(
 			this.reconnectBaseDelayMs * 2 ** this.reconnectAttempt +
@@ -744,12 +799,13 @@ export class WebSocketManager<
 		// close event for manager-initiated disconnects, so handleClose
 		// never runs on this path.
 		this.clearTimers();
-		this.clearPendingSubscriptions();
-		this.dropInFlight();
 		this.connectAttemptId++;
 		this.detachTransportHandlers();
 		this.transport.disconnect(4000, "pong timeout");
 		this.scheduleReconnect();
+		// After the state flip (see handleClose ordering rule).
+		this.clearPendingSubscriptions();
+		this.dropInFlight();
 	}
 
 	private startPingInterval(): void {

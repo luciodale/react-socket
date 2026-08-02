@@ -406,6 +406,11 @@ type TInFlightDropSource<TClientMsg> = {
  * roll back optimistic UI added in `useSocketSendIntent`, or to enqueue
  * the messages for resend via `createUndeliveredSync`.
  *
+ * Handlers run AFTER the connection state has settled, so a direct
+ * `send()` from inside the handler fails as `"not-connected"` (surfacing
+ * via `useSocketSendFailed`) instead of writing to a dead socket — queue
+ * the message and flush from `useSocketReady` instead.
+ *
  * @example
  * ```tsx
  * useSocketInFlightDrop(manager, (dropped) => {

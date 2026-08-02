@@ -120,7 +120,7 @@ export const prerender = true;
 		<Callout type="warning">
 			After exhausting all attempts, the state moves to
 			<InlineCode>"disconnected"</InlineCode> and no further retries are made.
-			Call <InlineCode>connect()</InlineCode> or <InlineCode>forceReconnect()</InlineCode> to try again manually.
+			Call <InlineCode>connect()</InlineCode> or <InlineCode>forceReconnect()</InlineCode> to try again manually — both start a fresh retry budget.
 		</Callout>
 		<Callout type="info" title="reconnectAttempt is bookkeeping, not delivered count">
 			<InlineCode>manager.getSnapshot().reconnectAttempt</InlineCode>
@@ -149,6 +149,12 @@ export const prerender = true;
 			(e.g. after a token refresh), call
 			<InlineCode>forceReconnect()</InlineCode> directly.
 		</Callout>
+		<p class="text-white/60 mt-4 leading-relaxed">
+			Exception: after a server-initiated clean close (code 1000) these
+			listeners are detached — a network blip cannot resurrect a session
+			the server deliberately ended. Calling
+			<InlineCode>connect()</InlineCode> re-attaches them.
+		</p>
 	</ContentSection>
 
 	<ContentSection label="Force Reconnect">

@@ -2022,6 +2022,246 @@ describe("WebSocketManager", () => {
 		});
 	});
 
+	describe("audit regressions: reentrancy, supersede, emit ordering", () => {
+		it("clean server close (1000) is not resurrected by a browser online event", () => {
+			if (typeof window === "undefined") return;
+			const { manager, transport } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+
+			transport.simulateClose(1000);
+			expect(manager.getConnectionState()).toBe("disconnected");
+
+			window.dispatchEvent(new Event("online"));
+			vi.advanceTimersByTime(10_000);
+
+			expect(manager.getConnectionState()).toBe("disconnected");
+			expect(transport.connectCalls).toHaveLength(1);
+		});
+
+		it("online during an in-flight dynamic url resolution supersedes it — no double connect", async () => {
+			if (typeof window === "undefined") return;
+			const transport = new MockTransport();
+			let resolveUrl!: (u: string) => void;
+			let call = 0;
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: () => {
+					call++;
+					if (call === 2) {
+						// The first retry's resolver hangs (network down).
+						return new Promise<string>((r) => {
+							resolveUrl = r;
+						});
+					}
+					return `ws://attempt-${call}`;
+				},
+				transport,
+				reconnectBaseDelayMs: 10,
+				reconnectMaxDelayMs: 100,
+				reconnectMaxAttempts: 5,
+			});
+
+			manager.connect();
+			await vi.waitFor(() => expect(transport.connectCalls).toHaveLength(1));
+			transport.simulateOpen();
+
+			// Drop → retry timer fires → second url() call hangs.
+			transport.simulateClose(1006);
+			await vi.advanceTimersByTimeAsync(1200);
+			expect(call).toBe(2);
+
+			// Browser comes back online while the resolver is in flight.
+			window.dispatchEvent(new Event("online"));
+
+			// The stale resolver completes — must be ignored, not connect.
+			resolveUrl("ws://stale");
+			await vi.advanceTimersByTimeAsync(0);
+			expect(transport.connectCalls).toHaveLength(1);
+
+			// Only the attempt scheduled by `online` opens a socket.
+			await vi.advanceTimersByTimeAsync(1200);
+			expect(transport.connectCalls).toHaveLength(2);
+			expect(transport.connectCalls[1].url).toBe("ws://attempt-3");
+		});
+
+		it("reentrant disconnect() during the reconnecting emit does not arm the retry timer", () => {
+			const { manager, transport } = createManager();
+			manager.addConnectionStateListener(() => {
+				if (manager.getConnectionState() === "reconnecting") {
+					manager.disconnect();
+				}
+			});
+			manager.connect();
+			transport.simulateOpen();
+
+			transport.simulateClose(1006);
+			expect(manager.getConnectionState()).toBe("disconnected");
+
+			vi.advanceTimersByTime(10_000);
+			expect(transport.connectCalls).toHaveLength(1);
+			expect(manager.getConnectionState()).toBe("disconnected");
+		});
+
+		it("reentrant disconnect() during the connected emit stops heartbeat, replay, and ready", () => {
+			const transport = new MockTransport();
+			const readyStates: TConnectionState[] = [];
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+				ping: () => ({ type: "ping" }),
+				pingIntervalMs: 1000,
+				pongTimeoutMs: 500,
+				pauseHeartbeatWhenHidden: false,
+				onReady: () => {
+					readyStates.push(manager.getConnectionState());
+				},
+			});
+			manager.addConnectionStateListener(() => {
+				if (manager.getConnectionState() === "connected") {
+					manager.disconnect();
+				}
+			});
+
+			manager.subscribe("room:1", subMsg("sub", "room:1"));
+			manager.connect();
+			transport.simulateOpen();
+
+			expect(manager.getConnectionState()).toBe("disconnected");
+			// ready must not fire on a manager that is no longer connected...
+			expect(readyStates).toHaveLength(0);
+			// ...no subscription replay onto the dead socket...
+			expect(transport.sentMessages).toHaveLength(0);
+			// ...and no leaked heartbeat firing forever.
+			vi.advanceTimersByTime(10_000);
+			expect(transport.sentMessages).toHaveLength(0);
+		});
+
+		it("connect() after reconnect exhaustion starts a fresh retry budget", async () => {
+			const { manager, transport } = createManager({
+				reconnectBaseDelayMs: 10,
+				reconnectMaxAttempts: 2,
+			});
+			manager.connect();
+			transport.simulateOpen();
+
+			// Exhaust both attempts.
+			transport.simulateClose(1006);
+			await vi.advanceTimersByTimeAsync(1200);
+			transport.simulateClose(1006);
+			await vi.advanceTimersByTimeAsync(1200);
+			transport.simulateClose(1006);
+			expect(manager.getConnectionState()).toBe("disconnected");
+			expect(transport.connectCalls).toHaveLength(3);
+
+			manager.connect();
+			expect(manager.getConnectionState()).toBe("connecting");
+			transport.simulateOpen();
+			expect(manager.getConnectionState()).toBe("connected");
+
+			// A drop must schedule a retry (fresh budget), not give up instantly.
+			transport.simulateClose(1006);
+			expect(manager.getConnectionState()).toBe("reconnecting");
+			await vi.advanceTimersByTimeAsync(1200);
+			expect(transport.connectCalls).toHaveLength(5);
+		});
+
+		it("beforeConnect reports attempt 0 on a manual connect() after exhaustion", async () => {
+			const transport = new MockTransport();
+			const attempts: number[] = [];
+			const manager = new WebSocketManager<TTestClientMsg, TTestServerMsg>({
+				...testSerialization,
+				url: "ws://test",
+				transport,
+				reconnectBaseDelayMs: 10,
+				reconnectMaxDelayMs: 100,
+				reconnectMaxAttempts: 1,
+				beforeConnect: ({ attempt }) => {
+					attempts.push(attempt);
+				},
+			});
+			manager.connect();
+			await vi.waitFor(() => expect(transport.connectCalls).toHaveLength(1));
+			transport.simulateOpen();
+			transport.simulateClose(1006);
+			await vi.advanceTimersByTimeAsync(1200);
+			transport.simulateClose(1006);
+			expect(manager.getConnectionState()).toBe("disconnected");
+
+			manager.connect();
+			await vi.waitFor(() =>
+				expect(transport.connectCalls.length).toBeGreaterThanOrEqual(3),
+			);
+			expect(attempts[attempts.length - 1]).toBe(0);
+		});
+
+		it("in-flight drop listeners observe the post-close state; a resend fails instead of ghosting", () => {
+			const { manager, transport } = createManager();
+			const observed: { state: TConnectionState; sendResult: boolean }[] = [];
+			manager.addInFlightDropListener(() => {
+				observed.push({
+					state: manager.getConnectionState(),
+					sendResult: manager.send({
+						data: { type: "resend" },
+						ackId: "resend-1",
+					}),
+				});
+			});
+			manager.connect();
+			transport.simulateOpen();
+			manager.send({ data: { type: "original" }, ackId: "orig-1" });
+
+			transport.simulateClose(1006);
+
+			expect(observed).toEqual([{ state: "reconnecting", sendResult: false }]);
+			expect(
+				Array.from(manager.getSnapshot().inFlightMessages.keys()),
+			).toHaveLength(0);
+		});
+
+		it("disconnect() during the connecting emit cancels the connect — socket never opens", () => {
+			const { manager, transport } = createManager();
+			manager.addConnectionStateListener(() => {
+				if (manager.getConnectionState() === "connecting") {
+					manager.disconnect();
+				}
+			});
+			manager.connect();
+
+			expect(transport.connectCalls).toHaveLength(0);
+			expect(manager.getConnectionState()).toBe("disconnected");
+		});
+
+		it("connect() during reconnecting supersedes the in-flight socket before opening a new one", async () => {
+			const { manager, transport } = createManager();
+			manager.connect();
+			transport.simulateOpen();
+
+			// Drop and let the retry fire: the socket is CONNECTING again.
+			transport.simulateClose(1006);
+			await vi.advanceTimersByTimeAsync(1200);
+			expect(transport.connectCalls).toHaveLength(2);
+			expect(manager.getConnectionState()).toBe("reconnecting");
+
+			// Manual connect while the retry's socket is mid-CONNECT.
+			manager.connect();
+
+			// The stale attempt was torn down before the new one started.
+			const lastDisconnect =
+				transport.disconnectCalls[transport.disconnectCalls.length - 1];
+			expect(lastDisconnect).toEqual({
+				code: 4000,
+				reason: "superseded by connect",
+			});
+			expect(transport.connectCalls).toHaveLength(3);
+			expect(manager.getConnectionState()).toBe("connecting");
+
+			transport.simulateOpen();
+			expect(manager.getConnectionState()).toBe("connected");
+		});
+	});
+
 	describe("window listener attachment", () => {
 		it("does not double-attach when connect() is called from reconnecting state", () => {
 			if (typeof window === "undefined") return;
