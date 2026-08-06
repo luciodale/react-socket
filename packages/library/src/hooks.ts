@@ -416,7 +416,7 @@ type TInFlightDropSource<TClientMsg> = {
  * useSocketInFlightDrop(manager, (dropped) => {
  *   for (const { id, data } of dropped) {
  *     markMessageFailed(id);
- *     undeliveredSync.enqueue(data);
+ *     undeliveredSync.addMessage("chat", data);
  *   }
  * });
  * ```
@@ -443,14 +443,18 @@ type TReadySource = {
 /**
  * Fires every time the socket transitions to `connected` AND existing
  * subscriptions have been replayed to the server. Receives the list of
- * resubscribed keys. Also fires on the very first connect, with
- * `restoredKeys = []`. Use this to flush queued offline sends or to
- * refetch state that may have drifted during the disconnect.
+ * resubscribed keys. Also fires on the very first connect — `restoredKeys`
+ * lists any subscriptions registered before `connect()` was called
+ * (empty when there were none). Use this to flush queued offline sends
+ * or to refetch state that may have drifted during the disconnect.
  *
  * @example
  * ```tsx
  * useSocketReady(manager, (restoredKeys) => {
- *   for (const msg of undeliveredSync.drain()) manager.send({ data: msg });
+ *   for (const msg of undeliveredSync.getChannelMessages("chat")) {
+ *     manager.send({ data: msg, ackId: msg.id });
+ *   }
+ *   undeliveredSync.clearChannel("chat");
  *   if (restoredKeys.length > 0) refetchSpaceStateForKeys(restoredKeys);
  * });
  * ```
@@ -476,7 +480,10 @@ type TLastUnsubscribeSource<TClientMsg> = {
 
 /**
  * Fires when the subscription ref count for `key` drops to zero — the
- * last subscriber left and the wire `unsubscribe` was sent. Use it to
+ * last subscriber left. The wire `unsubscribe` (if an unsubscribe
+ * payload was provided and the socket was connected) has been sent by
+ * the time this fires; for bookkeeping-only or offline unsubscribes the
+ * listener still fires without a wire send. Use it to
  * clear cached server state for the key, or to fire app-level cleanup
  * tied to "no one is watching this channel anymore."
  *

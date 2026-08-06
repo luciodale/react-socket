@@ -1,0 +1,58 @@
+# react-socket
+
+> TypeScript-first WebSocket library for React, published on npm as `@luciodale/react-socket`. Twelve hooks over one `WebSocketManager`: typed message unions, automatic reconnection with backoff, ref-counted subscriptions, in-flight/ack tracking, keep-alive, and an offline send queue.
+
+- Install: `npm install @luciodale/react-socket`
+- npm package: https://www.npmjs.com/package/@luciodale/react-socket
+- Source: https://github.com/luciodale/react-socket
+- Docs: https://koolcodez.com/projects/react-socket
+- Author: Lucio D'Alessandro (https://koolcodez.com)
+- License: MIT. Peer dependency: React 18+. Zero runtime dependencies.
+
+Also searched as: react socket, react websocket hook, react web socket client, typescript websocket library for react, useWebSocket alternative.
+
+## Getting started
+
+- [Introduction](https://koolcodez.com/projects/react-socket/docs/getting-started): What react-socket is, install, first manager and hooks.
+- [Configuration](https://koolcodez.com/projects/react-socket/docs/configuration): Every `WebSocketManager` option — url, serialize/deserialize, discriminator, heartbeat, reconnect tuning, `beforeConnect`, `getAckId`, `getSubscriptionResolvedKey`.
+- [API Reference](https://koolcodez.com/projects/react-socket/docs/api): All twelve hooks, manager methods, and exported types.
+
+## Guides
+
+- [Patterns](https://koolcodez.com/projects/react-socket/docs/patterns): Recipes for chat, presence, streaming LLM output, and request/response over a socket.
+- [Subscriptions](https://koolcodez.com/projects/react-socket/docs/subscriptions): Ref-counted channel subscriptions that dedupe across components and restore on reconnect.
+- [Sending & Optimistic UI](https://koolcodez.com/projects/react-socket/docs/optimistic-updates): Send intents, ack ids, and rendering optimistically before the server confirms.
+- [Reconnection](https://koolcodez.com/projects/react-socket/docs/reconnection): Exponential backoff with jitter, attempt caps, and subscription restore.
+- [Authentication](https://koolcodez.com/projects/react-socket/docs/auth): Token in the URL via `beforeConnect`, or first-message auth via `onReady`.
+- [Error handling](https://koolcodez.com/projects/react-socket/docs/error-handling): `useSocketSendFailed`, in-flight drops, and terminal disconnects.
+- [Testing](https://koolcodez.com/projects/react-socket/docs/testing): The `@luciodale/react-socket/testing` fake transport.
+- [Undelivered Sync](https://koolcodez.com/projects/react-socket/docs/undelivered-sync): Persisting sends made while offline and flushing them on reconnect.
+
+## Advanced
+
+- [Backpressure](https://koolcodez.com/projects/react-socket/docs/backpressure): `useSocketEventBatch` for high-frequency streams.
+- [Binary frames](https://koolcodez.com/projects/react-socket/docs/binary): ArrayBuffer/Blob payloads and custom codecs.
+- [Monitoring](https://koolcodez.com/projects/react-socket/docs/monitoring): `onDebug` events and the `@luciodale/react-socket/inspector` devtools panel.
+
+## Comparisons and migration
+
+- [vs react-use-websocket](https://koolcodez.com/projects/react-socket/docs/vs-react-use-websocket)
+- [vs Socket.IO](https://koolcodez.com/projects/react-socket/docs/vs-socket-io)
+- [Migrate from react-use-websocket](https://koolcodez.com/projects/react-socket/docs/migrate-from-react-use-websocket)
+- [Migrate from socket.io-client](https://koolcodez.com/projects/react-socket/docs/migrate-from-socket-io)
+
+## Live examples
+
+- [Quick prompt](https://koolcodez.com/projects/react-socket/demo/quick-prompt)
+- [AI conversation](https://koolcodez.com/projects/react-socket/demo/ai-conversation)
+- [Space (multiplayer)](https://koolcodez.com/projects/react-socket/demo/space)
+- [Space persistence](https://koolcodez.com/projects/react-socket/demo/undelivered-sync)
+- [Activity feed](https://koolcodez.com/projects/react-socket/demo/feed)
+- [Trading ticks](https://koolcodez.com/projects/react-socket/demo/trading)
+- [Authentication](https://koolcodez.com/projects/react-socket/demo/auth)
+- [Inspector](https://koolcodez.com/projects/react-socket/demo/inspector)
+
+## Optional
+
+- [Full text reference](https://koolcodez.com/projects/react-socket/llms-full.txt)
+- [Sitemap](https://koolcodez.com/projects/react-socket/sitemap-index.xml)

@@ -6,9 +6,87 @@ import Base from "../layouts/Base.astro";
 import { href } from "../lib/link";
 
 export const prerender = true;
+
+const NPM_URL = "https://www.npmjs.com/package/@luciodale/react-socket";
+
+// Ties the docs site to the published npm package as one entity, so search
+// engines and answer engines resolve "react-socket" to @luciodale/react-socket
+// rather than treating page, repo, and package as three unrelated things.
+const softwareLd = {
+	"@context": "https://schema.org",
+	"@type": "SoftwareApplication",
+	name: "@luciodale/react-socket",
+	alternateName: ["react-socket", "react socket", "React WebSocket hooks"],
+	description: siteConfig.description,
+	url: `${siteConfig.siteUrl}/`,
+	downloadUrl: NPM_URL,
+	installUrl: NPM_URL,
+	codeRepository: siteConfig.githubUrl,
+	sameAs: [NPM_URL, siteConfig.githubUrl],
+	applicationCategory: "DeveloperApplication",
+	operatingSystem: "Cross platform",
+	programmingLanguage: "TypeScript",
+	runtimePlatform: "React 18+",
+	license: "https://opensource.org/licenses/MIT",
+	keywords:
+		"react websocket, react web socket, websocket hooks, react websocket hook, typescript websocket, websocket client, websocket manager, reconnection, optimistic updates, realtime react",
+	author: {
+		"@type": "Person",
+		name: siteConfig.author,
+		url: "https://koolcodez.com",
+		sameAs: [siteConfig.socialLinks.github, siteConfig.socialLinks.linkedin],
+	},
+	offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+};
+
+const faqLd = {
+	"@context": "https://schema.org",
+	"@type": "FAQPage",
+	mainEntity: [
+		{
+			"@type": "Question",
+			name: "What is react-socket?",
+			acceptedAnswer: {
+				"@type": "Answer",
+				text: "react-socket is a TypeScript-first WebSocket library for React, published on npm as @luciodale/react-socket. It provides twelve hooks over a single WebSocketManager that owns reconnection with backoff, ref counted subscriptions, in flight and ack tracking, keep alive, and an offline send queue.",
+			},
+		},
+		{
+			"@type": "Question",
+			name: "How do I install react-socket?",
+			acceptedAnswer: {
+				"@type": "Answer",
+				text: "Run npm install @luciodale/react-socket. React 18 or newer is a peer dependency. The package page is https://www.npmjs.com/package/@luciodale/react-socket.",
+			},
+		},
+		{
+			"@type": "Question",
+			name: "How is react-socket different from react-use-websocket?",
+			acceptedAnswer: {
+				"@type": "Answer",
+				text: "react-use-websocket is a thin hook around one socket that gives you sendMessage and lastMessage, leaving message routing, deduplication, and reconnect restore to you. react-socket types the whole protocol with client and server message unions and moves that lifecycle logic into the library.",
+			},
+		},
+		{
+			"@type": "Question",
+			name: "How is react-socket different from Socket.IO?",
+			acceptedAnswer: {
+				"@type": "Answer",
+				text: "Socket.IO ships its own wire protocol and requires a Socket.IO server. react-socket speaks plain WebSocket, so it works with any backend that serves a WebSocket endpoint, and it is client only with zero runtime dependencies.",
+			},
+		},
+	],
+};
+
+const softwareLdJson = JSON.stringify(softwareLd).replace(/</g, "\\u003c");
+const faqLdJson = JSON.stringify(faqLd).replace(/</g, "\\u003c");
 ---
 
 <Base title={siteConfig.title} description={siteConfig.description}>
+	<Fragment slot="head">
+		<script type="application/ld+json" set:html={softwareLdJson} is:inline />
+		<script type="application/ld+json" set:html={faqLdJson} is:inline />
+	</Fragment>
 	<PageLayout config={siteConfig} currentPath="/">
 		<section class="flex flex-col items-center justify-center px-6 py-24 md:py-32 text-center max-w-3xl mx-auto">
 			<div class="flex items-center gap-4 mb-4">
@@ -39,6 +117,17 @@ export const prerender = true;
 					Copy
 				</span>
 			</button>
+			<p class="mt-4 text-sm text-white/40">
+				Published on npm as{" "}
+				<a
+					href="https://www.npmjs.com/package/@luciodale/react-socket"
+					target="_blank"
+					rel="noopener"
+					class="font-mono text-white/60 underline decoration-white/20 underline-offset-4 hover:text-accent hover:decoration-accent transition-colors"
+				>
+					@luciodale/react-socket
+				</a>
+			</p>
 			<div class="mt-12 flex gap-4">
 				<a
 					href={href("/docs/getting-started")}

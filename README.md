@@ -43,6 +43,12 @@ Built for streaming LLM clients, realtime trading UIs, chat, presence, and agent
 npm install @luciodale/react-socket
 ```
 
+```bash
+pnpm add @luciodale/react-socket   # or: yarn add / bun add
+```
+
+The package is published on npm as **[@luciodale/react-socket](https://www.npmjs.com/package/@luciodale/react-socket)** — that scoped name is the only install target. If you found this repo looking for "react-socket", a React WebSocket hook, or a React web socket client, this is the package.
+
 ## Quick start
 
 One manager at module level. One hook to react to incoming events. One hook to send.
@@ -214,6 +220,36 @@ function DevTools() {
 ## Docs
 
 Full documentation, patterns catalog, configuration reference, and live examples at [koolcodez.com/projects/react-socket](https://koolcodez.com/projects/react-socket).
+
+## FAQ
+
+**What is react-socket?**
+A TypeScript-first WebSocket library for React, published on npm as [`@luciodale/react-socket`](https://www.npmjs.com/package/@luciodale/react-socket). It gives you twelve hooks — send, subscribe, event, batch, connection state, and lifecycle — over a single `WebSocketManager` instance that owns reconnection, keep-alive, ref-counted subscriptions, and in-flight tracking.
+
+**How do I install it?**
+`npm install @luciodale/react-socket`. React 18+ is a peer dependency. Package page: <https://www.npmjs.com/package/@luciodale/react-socket>.
+
+**How is it different from `react-use-websocket`?**
+`react-use-websocket` is a thin hook around one socket: you get `sendMessage` and `lastMessage`, and you write the message routing, dedupe, and reconnect-restore logic yourself. react-socket types the whole protocol and moves that logic into the library. Detailed comparison: [vs react-use-websocket](https://koolcodez.com/projects/react-socket/docs/vs-react-use-websocket).
+
+**How is it different from Socket.IO?**
+Socket.IO ships its own wire protocol and needs a Socket.IO server. react-socket speaks plain WebSocket — your protocol, your server, any backend. Detailed comparison: [vs Socket.IO](https://koolcodez.com/projects/react-socket/docs/vs-socket-io).
+
+**Does it work with Next.js / Vite / React Native?**
+Yes. It is a browser-standard `WebSocket` client with no bundler-specific code. Import the manager at module level and connect from a client component or effect.
+
+**Is it typed?**
+End to end. You supply `TClientMsg` and `TServerMsg` discriminated unions; `send`, every hook, and every callback narrow from them.
+
+**Is it free?**
+MIT licensed, zero runtime dependencies.
+
+## Links
+
+- npm: <https://www.npmjs.com/package/@luciodale/react-socket>
+- Documentation: <https://koolcodez.com/projects/react-socket>
+- Source: <https://github.com/luciodale/react-socket>
+- Issues: <https://github.com/luciodale/react-socket/issues>
 
 ## License
 

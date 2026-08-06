@@ -32,6 +32,7 @@ const currentPath = Astro.url.pathname;
 			type={type}
 			noindex={noindex}
 		/>
+		<slot name="head" />
 	</head>
 	<body>
 		<slot />

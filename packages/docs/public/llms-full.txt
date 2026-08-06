@@ -1,0 +1,215 @@
+# react-socket — Full Reference
+
+> TypeScript-first WebSocket library for React. Published on npm as `@luciodale/react-socket`.
+> Docs: https://koolcodez.com/projects/react-socket
+> npm: https://www.npmjs.com/package/@luciodale/react-socket
+> Source: https://github.com/luciodale/react-socket
+> License: MIT. Author: Lucio D'Alessandro.
+
+## What it is
+
+react-socket is a WebSocket manager for React apps. You declare your client and
+server message types as discriminated unions, create one `WebSocketManager` at
+module level, and consume it through twelve single-purpose hooks. The library
+owns the parts people usually rewrite by hand: reconnection with exponential
+backoff and jitter, ref-counted subscriptions that dedupe across components and
+restore after a drop, ack/in-flight tracking, ping/pong keep-alive, and an
+optional offline send queue.
+
+It speaks plain WebSocket. No custom wire protocol, no server SDK — any backend
+that serves a WebSocket endpoint works (Node, Go, Rust, Cloudflare Durable
+Objects, Elixir, Python).
+
+## Install
+
+```bash
+npm install @luciodale/react-socket
+# pnpm add @luciodale/react-socket
+# yarn add @luciodale/react-socket
+# bun add @luciodale/react-socket
+```
+
+Requirements: React 18+ (hooks are built on `useSyncExternalStore`),
+TypeScript 4.7+ recommended, modern evergreen browsers. Zero runtime
+dependencies.
+
+Entry points:
+- `@luciodale/react-socket` — manager + hooks
+- `@luciodale/react-socket/inspector` — devtools panel (tree-shakes out of prod)
+- `@luciodale/react-socket/testing` — fake transport for unit tests
+
+## Quick start
+
+```tsx
+import { useEffect, useState } from "react"
+import {
+  WebSocketManager,
+  useSocketEvent,
+  useSocketSend,
+} from "@luciodale/react-socket"
+
+type TClientMsg = { type: "echo"; text: string }
+type TServerMsg = { type: "echo"; text: string }
+
+const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  url: "wss://your-server.com/ws",
+  serialize: (msg) => JSON.stringify(msg),
+  deserialize: (raw) => JSON.parse(raw),
+})
+
+export function Echo() {
+  const [response, setResponse] = useState<string | null>(null)
+  const { send } = useSocketSend(manager)
+
+  useSocketEvent(manager, "echo", (msg) => setResponse(msg.text))
+
+  useEffect(() => {
+    manager.connect()
+    return () => manager.disconnect()
+  }, [])
+
+  return (
+    <button onClick={() => send({ type: "echo", text: "hello" })}>send</button>
+  )
+}
+```
+
+## The twelve hooks
+
+- `useSocketEvent(manager, type, cb)` — react to one incoming message type; the
+  callback argument is narrowed via `Extract<TServerMsg, { type: T }>`.
+- `useSocketEventBatch(manager, type, cb, { flushMs })` — same, but buffers and
+  flushes on an interval. For high-frequency streams (ticks, telemetry).
+- `useSocketSubscription(manager, { key, subscribe, unsubscribe })` — ref-counted
+  server-side subscription. N components with the same key produce one subscribe
+  message; the unsubscribe fires when the last one unmounts.
+- `useSocketPendingSubscription(manager, key)` — `true` while a subscribe is in
+  flight; drives "joining…" UI.
+- `useSocketSend(manager)` — returns `{ send }`. `send(data, ackId?)` returns a
+  boolean indicating whether the message left the client.
+- `useSocketSendIntent(manager, cb)` — fires on every `send()`, even offline.
+  This is the optimistic-update hook.
+- `useSocketSendFailed(manager, cb)` — fires when a send never left the client;
+  `reason` is `"not-connected" | "serialize-error" | "transport-error"`.
+- `useSocketInFlightDrop(manager, cb)` — fires with the messages dropped when a
+  connection closes before their acks arrived.
+- `useSocketReady(manager, cb)` — fires after every (re)connect with the list of
+  restored subscription keys.
+- `useSocketLastUnsubscribe(manager, cb)` — fires when the last subscriber for a
+  key unmounts; second argument is the original subscribe payload.
+- `useSocketConnectionState(manager)` — re-rendering connection state.
+- `useSocketConnectionChange(manager, cb)` — event counterpart, no re-render.
+
+Connection states: `"idle" | "disconnected" | "connecting" | "connected" | "reconnecting"`.
+`"idle"` means `connect()` was never called — distinct from `"disconnected"`.
+
+## Manager configuration (`TManagerConfig`)
+
+Required:
+- `url: string | (() => string | Promise<string>)` — static or resolved per attempt.
+- `serialize: (msg: TClientMsg) => TWire`
+- `deserialize: (raw: TIncoming) => TServerMsg`
+
+Optional:
+- `discriminator` — key used to narrow server messages. Defaults to `"type"`.
+- `transport` — inject a custom `IWebSocketTransport` (used by the testing entry point).
+- `binaryType` — `"blob" | "arraybuffer"` for binary frames.
+- `pingIntervalMs`, `pongTimeoutMs`, `ping()`, `isPong(msg)` — keep-alive.
+- `pauseHeartbeatWhenHidden` — defaults to `true`; avoids spurious pong timeouts
+  from background-tab throttling.
+- `reconnectMaxAttempts` (default 10), `reconnectBaseDelayMs`, `reconnectMaxDelayMs`.
+- `getAckId(msg)` — return the ack id carried by a server message; the library
+  clears the matching in-flight entry automatically.
+- `getSubscriptionResolvedKey(msg)` — return the subscription key a server
+  message confirms; clears the pending-subscription flag.
+- `beforeConnect({ trigger, attempt })` — awaited before every attempt (first
+  connect, each retry, `forceReconnect()`), and before a dynamic `url()`
+  resolves. The place to refresh an auth token. If it throws, the attempt aborts
+  to `"disconnected"` with no auto-retry.
+- `onReady(restoredKeys)` — fires after the socket opens. Use for first-message auth.
+- `onDebug(event)` — every lifecycle event; powers the Inspector.
+
+## Manager methods
+
+`connect()`, `disconnect()`, `forceReconnect()`, `dispose()`, `send({ data, ackId })`,
+`subscribe(key, data?)`, `unsubscribe(key, data?)`, `getRefCount(key)`,
+`hasPendingSubscription(key)`, `ackInFlight(ackId)`, `resolvePendingSubscription(key)`,
+`getConnectionState()`, `getSnapshot()`, `setProtocols(protocols)`, plus
+`addXxxListener` methods mirroring each hook for non-React call sites.
+
+## Acknowledged sends
+
+```ts
+const manager = new WebSocketManager<TClientMsg, TServerMsg>({
+  url: "wss://...",
+  serialize: JSON.stringify,
+  deserialize: (raw) => JSON.parse(raw),
+  getAckId: (msg) => (msg.type === "delivered" ? msg.ackId : undefined),
+})
+
+const id = crypto.randomUUID()
+send({ type: "message", id, text }, id) // second arg is the ack id
+```
+
+## Subscriptions
+
+```tsx
+useSocketSubscription(manager, {
+  key: roomId,
+  subscribe: { type: "subscribe", channel: roomId },
+  unsubscribe: (sub) => ({ type: "unsubscribe", channel: sub.channel }),
+})
+```
+
+Three components mounting the same `roomId` send one subscribe message. When all
+three unmount, one unsubscribe fires. Reconnect replays the subscription.
+
+## Authentication
+
+Two shapes, both first-class:
+- Token in the connection: `url: () => \`wss://host/ws?token=\${auth.token}\`` plus
+  `beforeConnect` to refresh it before each attempt.
+- Token as the first message: send it from `onReady`, which fires after open.
+
+## Offline queue (undelivered sync)
+
+`createUndeliveredSync` keeps per-channel lists of messages that have not been
+confirmed delivered, persisted through an `IStorage` (`createLocalStorage` is
+provided). The API is `addMessage(channel, msg)`, `getChannelMessages(channel)`,
+and `clearChannel(channel)`; messages need an `id` and are deduped by it. The
+usual wiring is `useSocketSendFailed` / `useSocketInFlightDrop` to enqueue and
+`useSocketReady` to replay and clear on reconnect.
+
+## Testing
+
+`@luciodale/react-socket/testing` exposes `createMockTransport` / `MockTransport`
+so tests drive the socket deterministically — open it, push a server frame, drop
+the connection — without a real server or timers.
+
+## Inspector
+
+```tsx
+import { InspectorPanel } from "@luciodale/react-socket/inspector"
+
+<InspectorPanel manager={manager} />
+```
+
+Live traffic, subscription ref counts, in-flight entries, connection timeline.
+
+## How it compares
+
+**vs `react-use-websocket`** — that library is a thin hook around one socket:
+`sendMessage` + `lastMessage`, and you hand-write routing, dedupe, and
+restore-on-reconnect. react-socket types the protocol end to end and moves the
+lifecycle into the library. https://koolcodez.com/projects/react-socket/docs/vs-react-use-websocket
+
+**vs Socket.IO** — Socket.IO ships its own wire protocol and requires a Socket.IO
+server; it also bundles rooms, namespaces, and HTTP long-poll fallback.
+react-socket is plain WebSocket, client-only, and much smaller — you keep your
+protocol and your server.
+https://koolcodez.com/projects/react-socket/docs/vs-socket-io
+
+## Typical use cases
+
+Streaming LLM and agent clients, realtime trading and market-data UIs, chat,
+collaborative editing, presence, live dashboards, and multiplayer demos.

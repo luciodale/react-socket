@@ -4,7 +4,8 @@
 	"author": "Lucio D'Alessandro",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/luciodale/react-socket"
+		"url": "git+https://github.com/luciodale/react-socket.git",
+		"directory": "packages/library"
 	},
 	"module": "dist/react-socket.es.js",
 	"peerDependencies": {
@@ -35,6 +36,9 @@
 		"README.md"
 	],
 	"keywords": [
+		"react-socket",
+		"react socket",
+		"luciodale",
 		"react",
 		"typescript",
 		"websocket",
@@ -44,18 +48,28 @@
 		"react websocket",
 		"websocket react",
 		"react web socket",
+		"websocket hooks",
+		"websocket hook",
+		"react websocket hook",
+		"use-websocket",
+		"usewebsocket",
+		"websocket client",
+		"websocket manager",
 		"react-hooks",
 		"hooks",
 		"realtime",
 		"real-time",
 		"reconnection",
+		"reconnecting-websocket",
 		"optimistic-updates",
 		"offline-first",
 		"message-queue",
 		"streaming",
 		"type-safe",
 		"llm-streaming",
-		"ai-streaming"
+		"ai-streaming",
+		"socket.io-alternative",
+		"react-use-websocket-alternative"
 	],
 	"license": "MIT",
 	"types": "dist/index.d.ts"
